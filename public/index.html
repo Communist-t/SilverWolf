@@ -2263,6 +2263,17 @@
         background: linear-gradient(135deg, #806cff, #624bec);
       }
 
+      html[data-theme="dark"] .app-navigation .nav-symbol {
+        border-color: var(--line);
+        color: var(--muted);
+        background: var(--surface-soft);
+      }
+
+      html[data-theme="dark"] .app-navigation .nav-item.active .nav-symbol {
+        color: #fff;
+        background: linear-gradient(135deg, #9a88ff, #806cff);
+      }
+
       .app-navigation .nav-item:disabled {
         cursor: default;
         opacity: 0.58;
@@ -2626,6 +2637,12 @@
         font-weight: 800;
       }
 
+      html[data-theme="dark"] .model-status-pill,
+      html[data-theme="dark"] .model-config-badge {
+        color: #56c99d;
+        background: rgba(53, 184, 135, 0.15);
+      }
+
       .model-current-stat {
         padding-left: 14px;
         border-left: 1px solid var(--line);
@@ -2709,6 +2726,12 @@
       .model-config-item.active {
         border-color: var(--violet);
         box-shadow: 0 0 0 1px color-mix(in srgb, var(--violet) 35%, transparent);
+      }
+
+      .model-config-item.selected {
+        border-color: var(--blue);
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--blue) 30%, transparent);
+        background: color-mix(in srgb, var(--blue) 6%, var(--surface-solid));
       }
 
       .model-config-index {
@@ -2853,6 +2876,12 @@
         color: #119768;
         background: #effbf6;
         font-size: 12px;
+      }
+
+      html[data-theme="dark"] .model-connection-status {
+        border-color: rgba(53, 184, 135, 0.2);
+        color: #56c99d;
+        background: rgba(53, 184, 135, 0.08);
       }
 
       .model-form-actions {
@@ -4965,6 +4994,7 @@
       let resolveActionDialog = null;
       let actionDialogUsesInput = false;
       let modelSettings = { models: [], activeModel: null, templates: {} };
+      let selectedModelConfigId = null;
       let sessions = [];
       let batchMode = false;
       const selectedSessionIds = new Set();
@@ -5091,6 +5121,26 @@
         modelSettingsDialog.hidden = true;
         modelSettingsNav.classList.remove("active");
         conversationNav.classList.add("active");
+        clearSelectedModel();
+      }
+
+      function clearSelectedModel() {
+        selectedModelConfigId = null;
+        modelConfigForm.reset();
+        modelConfigForm.querySelector(".model-panel-head h3").textContent = "模型详情";
+        setModelFeedback();
+      }
+
+      function selectModelConfig(model) {
+        selectedModelConfigId = model.id;
+        modelConfigLabel.value = model.label || "";
+        modelConfigProvider.value = model.provider || "";
+        modelConfigBaseUrl.value = model.baseURL || "";
+        modelConfigModel.value = model.model || "";
+        modelConfigApiKey.value = "";
+        modelConfigForm.querySelector(".model-panel-head h3").textContent = "编辑模型";
+        setModelFeedback("已选择模型，修改后点击保存。API Key 留空则不更新。");
+        renderModelConfigs();
       }
 
       function describeModel(model) {
@@ -5124,7 +5174,7 @@
 
         for (const [index, model] of modelSettings.models.entries()) {
           const item = document.createElement("article");
-          item.className = `model-config-item${model.active ? " active" : ""}`;
+          item.className = `model-config-item${model.active ? " active" : ""}${selectedModelConfigId === model.id ? " selected" : ""}`;
 
           const number = document.createElement("span");
           number.className = "model-config-index";
@@ -5161,7 +5211,10 @@
             model.active ? "当前模型" : `切换到 ${getModelDisplayName(model)}`
           );
           activate.disabled = model.active;
-          activate.addEventListener("click", () => activateModelConfig(model.id));
+          activate.addEventListener("click", (event) => {
+            event.stopPropagation();
+            activateModelConfig(model.id);
+          });
           actions.append(activate);
 
           if (!model.builtIn && !model.active) {
@@ -5171,12 +5224,16 @@
             remove.innerHTML = '<i class="ph ph-dots-three-vertical" aria-hidden="true"></i>';
             remove.title = "删除模型";
             remove.setAttribute("aria-label", `删除 ${model.label}`);
-            remove.addEventListener("click", () => deleteModelConfig(model.id, model.label));
+            remove.addEventListener("click", (event) => {
+              event.stopPropagation();
+              deleteModelConfig(model.id, model.label);
+            });
             actions.append(remove);
           }
 
           title.append(badge);
           item.append(number, icon, title, actions);
+          item.addEventListener("click", () => selectModelConfig(model));
           modelConfigList.append(item);
         }
         const addCard = document.createElement("button");
@@ -5210,6 +5267,7 @@
       }
 
       function fillCompatibleTemplate() {
+        clearSelectedModel();
         const template = modelSettings.templates?.compatible ?? {
           label: "自定义模型",
           provider: "OpenAI 兼容",
@@ -6651,6 +6709,7 @@
       });
 
       refreshModels.addEventListener("click", () => {
+        clearSelectedModel();
         fillCompatibleTemplate();
         setModelFeedback("已载入通用模型模板。", "success");
       });
@@ -6658,32 +6717,61 @@
       useCompatibleTemplate.addEventListener("click", fillCompatibleTemplate);
 
       deleteCurrentModel.addEventListener("click", () => {
-        setModelFeedback("请在左侧模型列表中选择可删除的自定义模型。", "error");
+        if (!selectedModelConfigId) {
+          setModelFeedback("请在左侧模型列表中先选择一个自定义模型。", "error");
+          return;
+        }
+        const model = modelSettings.models.find(m => m.id === selectedModelConfigId);
+        if (!model || model.builtIn) {
+          setModelFeedback("内置模型不可删除。", "error");
+          return;
+        }
+        if (model.active) {
+          setModelFeedback("当前使用的模型不可删除，请先切换到其他模型。", "error");
+          return;
+        }
+        deleteModelConfig(selectedModelConfigId, model.label);
       });
 
       modelConfigForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         saveModelConfig.disabled = true;
-        setModelFeedback("正在保存模型...");
+        const isEditing = selectedModelConfigId !== null;
+        setModelFeedback(isEditing ? "正在保存修改..." : "正在保存模型...");
         try {
-          const response = await apiFetch("/settings/models", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              label: modelConfigLabel.value,
-              provider: modelConfigProvider.value,
-              baseURL: modelConfigBaseUrl.value,
-              model: modelConfigModel.value,
-              apiKey: modelConfigApiKey.value,
-            }),
-          });
+          const payload = {
+            label: modelConfigLabel.value,
+            provider: modelConfigProvider.value,
+            baseURL: modelConfigBaseUrl.value,
+            model: modelConfigModel.value,
+          };
+          if (modelConfigApiKey.value.trim()) {
+            payload.apiKey = modelConfigApiKey.value;
+          }
+
+          let response;
+          if (isEditing) {
+            response = await apiFetch(`/settings/models/${encodeURIComponent(selectedModelConfigId)}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+          } else {
+            payload.apiKey = modelConfigApiKey.value;
+            if (!payload.apiKey.trim()) throw new Error("API Key 不能为空");
+            response = await apiFetch("/settings/models", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            });
+          }
           const data = await response.json();
-          if (!response.ok) throw new Error(data.error || "保存模型失败");
-          modelConfigForm.reset();
+          if (!response.ok) throw new Error(data.error || "保存失败");
+          clearSelectedModel();
           await loadModelSettings();
-          setModelFeedback("模型已保存，可在列表中切换。", "success");
+          setModelFeedback(isEditing ? "修改已保存。" : "模型已保存，可在列表中切换。", "success");
         } catch (error) {
-          setModelFeedback(error instanceof Error ? error.message : "保存模型失败", "error");
+          setModelFeedback(error instanceof Error ? error.message : "保存失败", "error");
         } finally {
           saveModelConfig.disabled = false;
         }
