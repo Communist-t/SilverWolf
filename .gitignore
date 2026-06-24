@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+dist/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Local data (databases, logs, runtime files)
+data/*
+!data/.gitkeep
+
+# Logs and caches
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.cache/
+.turbo/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Personal notes
+rizhi.txt
+
+# Test outputs
+server-3000.log
+server.log

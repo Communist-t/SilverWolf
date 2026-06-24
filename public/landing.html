@@ -1,0 +1,1913 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Silver Wolf AI Agent System，具备自然语言交互、联网检索、连续记忆与安全数据管理能力。"
+    />
+    <title>Silver Wolf AI Agent System</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #11101d;
+        --ink-soft: #45425f;
+        --muted: #777491;
+        --purple: #6847f5;
+        --purple-deep: #4b2be0;
+        --purple-soft: #eeeaff;
+        --cyan: #20a7c8;
+        --mint: #22a979;
+        --line: rgba(73, 64, 121, 0.12);
+        --surface: rgba(255, 255, 255, 0.82);
+        --shadow: 0 18px 50px rgba(64, 48, 128, 0.1);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html {
+        scroll-behavior: smooth;
+      }
+
+      body {
+        margin: 0;
+        color: var(--ink);
+        background: #f9f9ff;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", "Microsoft YaHei", sans-serif;
+      }
+
+      a {
+        color: inherit;
+        text-decoration: none;
+      }
+
+      button,
+      a {
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      .site-shell {
+        min-height: 100vh;
+        overflow: hidden;
+        background:
+          linear-gradient(rgba(105, 75, 245, 0.035) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(105, 75, 245, 0.035) 1px, transparent 1px),
+          linear-gradient(140deg, #ffffff 0%, #f8f8ff 58%, #f1f5ff 100%);
+        background-size: 42px 42px, 42px 42px, auto;
+      }
+
+      .site-header {
+        position: fixed;
+        z-index: 20;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 76px;
+        border-bottom: 1px solid transparent;
+        background: rgba(250, 250, 255, 0.76);
+        backdrop-filter: blur(18px);
+        transition: border-color 180ms ease, background 180ms ease;
+      }
+
+      .site-header.scrolled {
+        border-color: var(--line);
+        background: rgba(255, 255, 255, 0.92);
+      }
+
+      .header-inner {
+        display: grid;
+        grid-template-columns: minmax(220px, 1fr) auto minmax(220px, 1fr);
+        align-items: center;
+        width: min(1320px, calc(100% - 48px));
+        height: 100%;
+        margin: 0 auto;
+      }
+
+      .brand {
+        display: inline-flex;
+        align-items: center;
+        justify-self: start;
+        gap: 12px;
+        min-width: 0;
+      }
+
+      .brand img {
+        display: block;
+        width: 42px;
+        height: 42px;
+        object-fit: contain;
+        transform: translateY(-4px);
+      }
+
+      .brand-copy {
+        display: grid;
+        line-height: 1;
+      }
+
+      .brand-copy strong {
+        font-size: 18px;
+        letter-spacing: 0;
+      }
+
+      .brand-copy span {
+        margin-top: 5px;
+        color: var(--muted);
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 3px;
+      }
+
+      .site-nav {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 42px;
+      }
+
+      .site-nav a {
+        position: relative;
+        padding: 27px 0 25px;
+        color: #625e7b;
+        font-size: 14px;
+        font-weight: 700;
+      }
+
+      .site-nav a::after {
+        content: "";
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: 17px;
+        height: 2px;
+        background: var(--purple);
+        transform: scaleX(0);
+        transition: transform 160ms ease;
+      }
+
+      .site-nav a:hover,
+      .site-nav a.active {
+        color: var(--purple);
+      }
+
+      .site-nav a:hover::after,
+      .site-nav a.active::after {
+        transform: scaleX(1);
+      }
+
+      .header-action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        justify-self: end;
+        min-height: 44px;
+        padding: 0 20px;
+        border: 1px solid rgba(104, 71, 245, 0.15);
+        border-radius: 8px;
+        color: #fff;
+        background: var(--purple);
+        box-shadow: 0 10px 24px rgba(104, 71, 245, 0.22);
+        font-size: 13px;
+        font-weight: 700;
+        transition: transform 160ms ease, background 160ms ease;
+      }
+
+      .header-action:hover {
+        background: var(--purple-deep);
+        transform: translateY(-1px);
+      }
+
+      .menu-toggle {
+        display: none;
+        width: 40px;
+        height: 40px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--ink);
+        background: #fff;
+        font-size: 20px;
+        cursor: pointer;
+      }
+
+      .hero {
+        position: relative;
+        display: grid;
+        align-items: center;
+        min-height: clamp(680px, 78vh, 780px);
+        padding: 112px max(32px, calc((100vw - 1320px) / 2)) 42px;
+        isolation: isolate;
+      }
+
+      .hero::after {
+        content: "";
+        position: absolute;
+        z-index: -2;
+        right: 0;
+        bottom: 0;
+        width: 54%;
+        height: 74%;
+        background:
+          linear-gradient(90deg, rgba(104, 71, 245, 0.08) 1px, transparent 1px),
+          linear-gradient(rgba(104, 71, 245, 0.08) 1px, transparent 1px);
+        background-size: 28px 28px;
+        mask-image: linear-gradient(to left, #000 25%, transparent 92%);
+        opacity: 0.7;
+      }
+
+      .hero-content {
+        position: relative;
+        z-index: 3;
+        width: min(570px, 48vw);
+      }
+
+      .eyebrow {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        margin-bottom: 18px;
+        color: var(--purple);
+        font-size: 12px;
+        font-weight: 800;
+        text-transform: uppercase;
+      }
+
+      .eyebrow::before {
+        content: "";
+        width: 24px;
+        height: 2px;
+        background: var(--purple);
+      }
+
+      .hero h1 {
+        margin: 0;
+        color: #0b0a13;
+        font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+        font-size: 96px;
+        font-weight: 900;
+        line-height: 0.88;
+        letter-spacing: 0;
+      }
+
+      .hero h1 span {
+        display: block;
+        margin-top: 20px;
+        color: var(--purple);
+        font-family: inherit;
+        font-size: 44px;
+        line-height: 1;
+      }
+
+      .hero-lead {
+        max-width: 520px;
+        margin: 34px 0 0;
+        color: #1c1a2d;
+        font-size: 18px;
+        font-weight: 750;
+        line-height: 1.65;
+      }
+
+      .hero-subline {
+        margin: 9px 0 0;
+        color: var(--muted);
+        font-size: 11px;
+        font-weight: 600;
+        line-height: 1.6;
+        text-transform: uppercase;
+      }
+
+      .hero-actions {
+        display: flex;
+        align-items: center;
+        gap: 20px;
+        margin-top: 28px;
+      }
+
+      .agent-demo {
+        width: min(520px, 100%);
+        margin-top: 26px;
+        padding: 16px;
+        border: 1px solid rgba(104, 71, 245, 0.18);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.88);
+        box-shadow: 0 18px 46px rgba(64, 48, 128, 0.12);
+        backdrop-filter: blur(14px);
+      }
+
+      .demo-question,
+      .demo-result {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        gap: 10px;
+        align-items: start;
+      }
+
+      .demo-question strong,
+      .demo-result strong {
+        color: var(--purple);
+        font-size: 11px;
+      }
+
+      .demo-question span,
+      .demo-result span {
+        color: var(--ink-soft);
+        font-size: 13px;
+        line-height: 1.55;
+      }
+
+      .demo-status {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin: 12px 0;
+        padding: 10px 0;
+        border-top: 1px solid var(--line);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .demo-status span {
+        padding: 5px 8px;
+        border-radius: 999px;
+        color: #5a43c4;
+        background: var(--purple-soft);
+        font-size: 11px;
+        font-weight: 750;
+      }
+
+      .primary-action,
+      .secondary-action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 14px;
+        min-height: 50px;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 750;
+        transition: transform 160ms ease, box-shadow 160ms ease;
+      }
+
+      .primary-action {
+        min-width: 198px;
+        padding: 0 24px;
+        color: #fff;
+        background: var(--purple);
+        box-shadow: 0 15px 32px rgba(104, 71, 245, 0.22);
+      }
+
+      .secondary-action {
+        padding: 0 10px;
+        color: #5d5875;
+      }
+
+      .primary-action:hover,
+      .secondary-action:hover {
+        transform: translateY(-2px);
+      }
+
+      .primary-action:hover {
+        box-shadow: 0 18px 40px rgba(104, 71, 245, 0.3);
+      }
+
+      .hero-character {
+        position: absolute;
+        z-index: 2;
+        right: max(-38px, calc((100vw - 1440px) / 2 - 12px));
+        bottom: 0;
+        width: auto;
+        max-width: none;
+        height: calc(100% - 76px);
+        object-fit: contain;
+        object-position: right bottom;
+        filter: drop-shadow(0 28px 34px rgba(61, 45, 121, 0.16));
+        pointer-events: none;
+        user-select: none;
+      }
+
+      .section {
+        position: relative;
+        padding: 82px max(32px, calc((100vw - 1320px) / 2));
+        border-top: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.86);
+      }
+
+      .section-heading {
+        max-width: 600px;
+      }
+
+      .section-label {
+        margin: 0 0 15px;
+        color: var(--purple);
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .section h2 {
+        margin: 0;
+        font-size: 34px;
+        line-height: 1.25;
+      }
+
+      .section-intro {
+        margin: 16px 0 0;
+        color: var(--muted);
+        font-size: 14px;
+        line-height: 1.8;
+      }
+
+      .capability-layout {
+        display: grid;
+        grid-template-columns: 320px minmax(0, 1fr);
+        gap: 72px;
+        align-items: start;
+      }
+
+      .text-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 12px;
+        min-height: 44px;
+        margin-top: 28px;
+        padding: 0 18px;
+        border: 1px solid rgba(104, 71, 245, 0.18);
+        border-radius: 8px;
+        color: var(--purple);
+        background: #fff;
+        font-size: 13px;
+        font-weight: 750;
+      }
+
+      .capability-grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .capability-card {
+        min-height: 220px;
+        padding: 24px 22px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.72);
+        transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+      }
+
+      .capability-card:hover {
+        border-color: rgba(104, 71, 245, 0.28);
+        box-shadow: var(--shadow);
+        transform: translateY(-4px);
+      }
+
+      .capability-symbol {
+        display: grid;
+        place-items: center;
+        width: 48px;
+        height: 48px;
+        margin-bottom: 28px;
+        border-radius: 50%;
+        color: var(--purple);
+        background: var(--purple-soft);
+        font-size: 17px;
+        font-weight: 850;
+      }
+
+      .capability-card:nth-child(2) .capability-symbol {
+        color: var(--cyan);
+        background: #e9f8fb;
+      }
+
+      .capability-card:nth-child(4) .capability-symbol {
+        color: var(--mint);
+        background: #e8f8f2;
+      }
+
+      .capability-card h3 {
+        margin: 0;
+        font-size: 16px;
+      }
+
+      .capability-card p {
+        margin: 12px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.75;
+      }
+
+      .capability-proof {
+        display: block;
+        margin-top: 18px;
+        padding-top: 14px;
+        border-top: 1px solid var(--line);
+        color: var(--ink-soft);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .scenarios {
+        background: #f6f7fc;
+      }
+
+      .case-study {
+        display: grid;
+        grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.5fr);
+        gap: 32px;
+        margin-top: 38px;
+        padding: 30px;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        background: #fff;
+      }
+
+      .case-prompt {
+        padding-right: 28px;
+        border-right: 1px solid var(--line);
+      }
+
+      .case-prompt small {
+        color: var(--purple);
+        font-size: 11px;
+        font-weight: 800;
+      }
+
+      .case-prompt h3 {
+        margin: 16px 0 12px;
+        font-size: 22px;
+        line-height: 1.35;
+      }
+
+      .case-prompt p {
+        margin: 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.75;
+      }
+
+      .case-flow {
+        display: grid;
+        gap: 12px;
+      }
+
+      .case-step {
+        display: grid;
+        grid-template-columns: 32px minmax(0, 1fr);
+        gap: 12px;
+        padding: 14px;
+        border-radius: 8px;
+        background: #f7f6ff;
+      }
+
+      .case-step b {
+        color: var(--purple);
+        font-size: 12px;
+      }
+
+      .case-step strong,
+      .case-step span {
+        display: block;
+      }
+
+      .case-step strong {
+        font-size: 14px;
+      }
+
+      .case-step span {
+        margin-top: 4px;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.6;
+      }
+
+      .architecture-details {
+        margin-top: 34px;
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: #fff;
+        overflow: hidden;
+      }
+
+      .architecture-details summary {
+        padding: 18px 22px;
+        color: var(--purple);
+        font-size: 13px;
+        font-weight: 800;
+        cursor: pointer;
+      }
+
+      .architecture-strip {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 1px;
+        margin-top: 0;
+        border: 0;
+        border-top: 1px solid var(--line);
+        background: var(--line);
+      }
+
+      .architecture-step {
+        min-height: 132px;
+        padding: 22px;
+        background: #fff;
+      }
+
+      .architecture-step b {
+        color: var(--purple);
+        font-size: 11px;
+      }
+
+      .architecture-step strong {
+        display: block;
+        margin-top: 16px;
+        font-size: 15px;
+      }
+
+      .architecture-step span {
+        display: block;
+        margin-top: 8px;
+        color: var(--muted);
+        font-size: 11px;
+        line-height: 1.6;
+      }
+
+      .site-footer {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 24px;
+        padding: 34px max(32px, calc((100vw - 1320px) / 2));
+        color: #d7d4e8;
+        background: #171522;
+        font-size: 11px;
+      }
+
+      .site-footer strong {
+        color: #fff;
+      }
+
+      @media (max-width: 1120px) {
+        .header-inner {
+          grid-template-columns: 1fr auto;
+        }
+
+        .site-nav {
+          display: none;
+        }
+
+        .hero-content {
+          width: min(550px, 58vw);
+        }
+
+        .hero h1 {
+          font-size: 76px;
+        }
+
+        .hero h1 span {
+          font-size: 36px;
+        }
+
+        .hero-character {
+          right: -120px;
+          width: auto;
+          height: calc(100% - 90px);
+          opacity: 0.94;
+        }
+
+        .capability-layout {
+          grid-template-columns: 1fr;
+          gap: 36px;
+        }
+
+        .capability-grid {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+      }
+
+      @media (max-width: 760px) {
+        .site-header {
+          height: 68px;
+        }
+
+        .header-inner {
+          width: calc(100% - 28px);
+          grid-template-columns: 1fr auto auto;
+          gap: 8px;
+        }
+
+        .brand img {
+          width: 36px;
+          height: 36px;
+        }
+
+        .brand-copy strong {
+          font-size: 14px;
+        }
+
+        .brand-copy span {
+          letter-spacing: 2px;
+          font-size: 7px;
+        }
+
+        .header-action {
+          min-height: 38px;
+          padding: 0 13px;
+          font-size: 11px;
+        }
+
+        .menu-toggle {
+          display: inline-grid;
+          place-items: center;
+        }
+
+        .site-nav.open {
+          position: absolute;
+          top: 68px;
+          left: 14px;
+          right: 14px;
+          display: grid;
+          gap: 0;
+          padding: 8px;
+          border: 1px solid var(--line);
+          border-radius: 8px;
+          background: #fff;
+          box-shadow: var(--shadow);
+        }
+
+        .site-nav.open a {
+          padding: 13px 12px;
+        }
+
+        .site-nav.open a::after {
+          display: none;
+        }
+
+        .hero {
+          display: block;
+          min-height: 900px;
+          padding: 112px 20px 30px;
+        }
+
+        .hero-content {
+          width: 100%;
+          padding-bottom: 0;
+        }
+
+        .hero h1 {
+          font-size: 58px;
+        }
+
+        .hero h1 span {
+          margin-top: 14px;
+          font-size: 28px;
+        }
+
+        .hero-lead {
+          max-width: 340px;
+          margin-top: 24px;
+          font-size: 15px;
+        }
+
+        .hero-subline {
+          max-width: 330px;
+          font-size: 9px;
+        }
+
+        .hero-actions {
+          gap: 10px;
+          margin-top: 24px;
+        }
+
+        .primary-action {
+          min-width: 158px;
+        }
+
+        .hero-character {
+          right: -60px;
+          bottom: 0;
+          width: auto;
+          height: 330px;
+          max-height: none;
+        }
+
+        .agent-demo {
+          padding: 14px;
+        }
+
+        .section {
+          padding: 64px 20px;
+        }
+
+        .section h2 {
+          font-size: 28px;
+        }
+
+        .capability-grid,
+        .case-study {
+          grid-template-columns: 1fr;
+        }
+
+        .capability-grid {
+          display: flex;
+          margin-right: -20px;
+          padding-right: 20px;
+          overflow-x: auto;
+          scroll-snap-type: x mandatory;
+        }
+
+        .capability-card {
+          flex: 0 0 min(82vw, 310px);
+          scroll-snap-align: start;
+        }
+
+        .case-study {
+          gap: 22px;
+          padding: 22px;
+        }
+
+        .case-prompt {
+          padding-right: 0;
+          padding-bottom: 20px;
+          border-right: 0;
+          border-bottom: 1px solid var(--line);
+        }
+
+        .capability-card {
+          min-height: 0;
+        }
+
+        .architecture-strip {
+          grid-template-columns: 1fr;
+        }
+
+        .site-footer {
+          align-items: flex-start;
+          flex-direction: column;
+          padding: 28px 20px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        html {
+          scroll-behavior: auto;
+        }
+
+        *,
+        *::before,
+        *::after {
+          transition: none !important;
+        }
+      }
+
+      /* Full-screen scene deck */
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        overscroll-behavior: none;
+        scrollbar-width: none;
+      }
+
+      html::-webkit-scrollbar,
+      body::-webkit-scrollbar,
+      .site-shell::-webkit-scrollbar {
+        display: none;
+      }
+
+      body {
+        touch-action: none;
+      }
+
+      .site-shell {
+        position: relative;
+        height: 100dvh;
+        min-height: 0;
+        overflow: hidden;
+        isolation: isolate;
+      }
+
+      .site-shell::before,
+      .site-shell::after {
+        content: "";
+        position: fixed;
+        z-index: 1;
+        pointer-events: none;
+      }
+
+      .site-shell::before {
+        inset: 76px 0 0;
+        background:
+          radial-gradient(circle at 74% 34%, rgba(111, 78, 245, 0.12), transparent 30%),
+          linear-gradient(rgba(105, 75, 245, 0.04) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(105, 75, 245, 0.04) 1px, transparent 1px);
+        background-size: auto, 42px 42px, 42px 42px;
+        mask-image: linear-gradient(to bottom, #000 0%, rgba(0, 0, 0, 0.65) 72%, transparent 100%);
+      }
+
+      .site-shell::after {
+        left: 0;
+        right: 0;
+        bottom: 0;
+        height: 30%;
+        background: linear-gradient(to top, rgba(76, 49, 210, 0.12), transparent);
+      }
+
+      .scene-deck {
+        position: relative;
+        z-index: 2;
+        width: 100%;
+        height: 100dvh;
+        perspective: 1600px;
+      }
+
+      .scene {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        align-items: center;
+        width: 100%;
+        height: 100dvh;
+        min-height: 0;
+        padding: 116px max(52px, calc((100vw - 1320px) / 2)) 132px;
+        border: 0;
+        background: transparent;
+        opacity: 0;
+        visibility: hidden;
+        overflow: hidden;
+        pointer-events: none;
+        transform: translateZ(0);
+      }
+
+      .scene.is-active,
+      .scene.is-entering,
+      .scene.is-leaving {
+        visibility: visible;
+      }
+
+      .scene.is-active,
+      .scene.is-entering {
+        pointer-events: auto;
+      }
+
+      .scene.is-active {
+        opacity: 1;
+      }
+
+      .scene::before {
+        content: attr(data-index);
+        position: absolute;
+        top: 126px;
+        left: max(52px, calc((100vw - 1320px) / 2));
+        color: rgba(104, 71, 245, 0.07);
+        font-family: Impact, Haettenschweiler, "Arial Narrow Bold", sans-serif;
+        font-size: clamp(104px, 13vw, 210px);
+        line-height: 0.8;
+        pointer-events: none;
+      }
+
+      .hero.scene {
+        padding-top: 116px;
+      }
+
+      .hero.scene::after {
+        bottom: 92px;
+      }
+
+      .hero-character {
+        bottom: 92px;
+        height: calc(100% - 168px);
+      }
+
+      .section-heading {
+        position: relative;
+        z-index: 2;
+      }
+
+      #capabilities .capability-layout {
+        grid-template-columns: minmax(270px, 0.72fr) minmax(0, 2fr);
+        gap: clamp(36px, 5vw, 82px);
+        align-items: center;
+      }
+
+      #capabilities .capability-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      #capabilities .capability-card {
+        min-height: 176px;
+        background: rgba(255, 255, 255, 0.66);
+        backdrop-filter: blur(15px);
+      }
+
+      #capabilities .capability-symbol {
+        margin-bottom: 18px;
+      }
+
+      #scenarios {
+        grid-template-columns: minmax(250px, 0.68fr) minmax(0, 1.55fr);
+        gap: clamp(36px, 6vw, 96px);
+      }
+
+      #scenarios .case-study {
+        position: relative;
+        margin: 0;
+        background: rgba(255, 255, 255, 0.72);
+        backdrop-filter: blur(18px);
+        box-shadow: 0 24px 80px rgba(69, 49, 151, 0.12);
+      }
+
+      #architecture {
+        align-content: center;
+      }
+
+      #architecture .section-heading {
+        max-width: 760px;
+        margin-bottom: 26px;
+      }
+
+      .architecture-details {
+        position: relative;
+        margin: 0;
+        background: rgba(255, 255, 255, 0.7);
+        backdrop-filter: blur(18px);
+        box-shadow: 0 24px 80px rgba(69, 49, 151, 0.12);
+      }
+
+      .architecture-details summary {
+        display: none;
+      }
+
+      .architecture-strip {
+        border-top: 0;
+      }
+
+      .architecture-step {
+        min-height: 184px;
+        background: rgba(255, 255, 255, 0.72);
+      }
+
+      .scene-counter {
+        position: fixed;
+        z-index: 25;
+        top: 116px;
+        left: max(32px, calc((100vw - 1360px) / 2));
+        display: flex;
+        align-items: baseline;
+        gap: 7px;
+        color: var(--purple);
+        font-size: 30px;
+        font-weight: 900;
+        font-variant-numeric: tabular-nums;
+        pointer-events: none;
+      }
+
+      .scene-counter span:last-child {
+        color: #aaa6bf;
+        font-size: 15px;
+        font-weight: 700;
+      }
+
+      .scene-dots {
+        position: fixed;
+        z-index: 25;
+        top: 50%;
+        right: 26px;
+        display: grid;
+        gap: 18px;
+        transform: translateY(-50%);
+      }
+
+      .scene-dot {
+        position: relative;
+        display: grid;
+        place-items: center;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        border: 0;
+        border-radius: 50%;
+        background: transparent;
+        cursor: pointer;
+      }
+
+      .scene-dot::before {
+        content: "";
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: #aaa6bb;
+        transition: width 180ms ease, height 180ms ease, background 180ms ease, box-shadow 180ms ease;
+      }
+
+      .scene-dot.active::before {
+        width: 10px;
+        height: 10px;
+        background: var(--purple);
+        box-shadow: 0 0 0 5px rgba(104, 71, 245, 0.14), 0 0 22px rgba(104, 71, 245, 0.6);
+      }
+
+      .scene-rail {
+        position: fixed;
+        z-index: 24;
+        left: 50%;
+        bottom: 20px;
+        display: grid;
+        grid-template-columns: repeat(4, minmax(120px, 1fr));
+        width: min(900px, calc(100% - 120px));
+        border: 1px solid rgba(104, 71, 245, 0.2);
+        border-radius: 12px;
+        background: rgba(255, 255, 255, 0.74);
+        box-shadow: 0 18px 52px rgba(70, 49, 153, 0.14);
+        backdrop-filter: blur(18px);
+        transform: translateX(-50%);
+        overflow: hidden;
+      }
+
+      .rail-button {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+        gap: 10px;
+        min-height: 58px;
+        padding: 8px 18px;
+        border: 0;
+        border-right: 1px solid rgba(104, 71, 245, 0.12);
+        color: #77738b;
+        background: transparent;
+        text-align: left;
+        cursor: pointer;
+        transition: color 180ms ease, background 180ms ease;
+      }
+
+      .rail-button:last-child {
+        border-right: 0;
+      }
+
+      .rail-button b {
+        color: #aaa6bd;
+        font-size: 18px;
+      }
+
+      .rail-button span,
+      .rail-button small {
+        display: block;
+      }
+
+      .rail-button span {
+        font-size: 12px;
+        font-weight: 800;
+      }
+
+      .rail-button small {
+        margin-top: 2px;
+        font-size: 8px;
+        letter-spacing: 1px;
+      }
+
+      .rail-button.active {
+        color: #fff;
+        background: linear-gradient(135deg, #7353ff, #4c2fdb);
+      }
+
+      .rail-button.active b {
+        color: #fff;
+      }
+
+      .transition-flash {
+        position: fixed;
+        z-index: 22;
+        inset: 76px 0 0;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .transition-flash.phase {
+        animation: phase-flash 1400ms cubic-bezier(.22,.68,.2,1) both;
+        background: repeating-linear-gradient(to bottom, transparent 0 10px, rgba(105, 72, 245, 0.12) 11px, transparent 12px);
+      }
+
+      .transition-flash.holo {
+        animation: holo-flash 1550ms cubic-bezier(.22,.68,.2,1) both;
+        background: linear-gradient(90deg, transparent 20%, rgba(116, 84, 255, 0.16) 50%, transparent 80%);
+      }
+
+      .transition-flash.portal {
+        animation: portal-flash 1800ms cubic-bezier(.2,.66,.18,1) both;
+        background: radial-gradient(circle at center, rgba(255, 255, 255, 0.92) 0 2%, rgba(105, 72, 245, 0.28) 8%, transparent 34%);
+      }
+
+      .transition-flash.rewind {
+        animation: rewind-flash 1650ms cubic-bezier(.22,.68,.2,1) both;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.84), transparent 32%),
+          repeating-linear-gradient(90deg, transparent 0 38px, rgba(105, 72, 245, 0.1) 39px, transparent 40px);
+      }
+
+      .enter-phase-forward { animation: enter-phase-forward 1400ms cubic-bezier(.22,.68,.2,1) both; }
+      .leave-phase-forward { animation: leave-phase-forward 1400ms cubic-bezier(.22,.68,.2,1) both; }
+      .enter-phase-back { animation: enter-phase-back 1400ms cubic-bezier(.22,.68,.2,1) both; }
+      .leave-phase-back { animation: leave-phase-back 1400ms cubic-bezier(.22,.68,.2,1) both; }
+      .enter-holo-forward { animation: enter-holo-forward 1550ms cubic-bezier(.22,.68,.2,1) both; }
+      .leave-holo-forward { animation: leave-holo-forward 1550ms cubic-bezier(.22,.68,.2,1) both; }
+      .enter-holo-back { animation: enter-holo-back 1550ms cubic-bezier(.22,.68,.2,1) both; }
+      .leave-holo-back { animation: leave-holo-back 1550ms cubic-bezier(.22,.68,.2,1) both; }
+      .enter-portal-forward,
+      .enter-portal-back { animation: enter-portal 1800ms cubic-bezier(.2,.66,.18,1) both; }
+      .leave-portal-forward,
+      .leave-portal-back { animation: leave-portal 1800ms cubic-bezier(.2,.66,.18,1) both; }
+      .enter-rewind-back { animation: enter-rewind-back 1650ms cubic-bezier(.22,.68,.2,1) both; }
+      .leave-rewind-back { animation: leave-rewind-back 1650ms cubic-bezier(.22,.68,.2,1) both; }
+
+      @keyframes enter-phase-forward { from { opacity: 0; filter: blur(14px); transform: translateY(22%) scale(.98); } to { opacity: 1; filter: blur(0); transform: none; } }
+      @keyframes leave-phase-forward { from { opacity: 1; filter: blur(0); transform: none; } to { opacity: 0; filter: blur(12px); transform: translateY(-18%) scale(.98); } }
+      @keyframes enter-phase-back { from { opacity: 0; filter: blur(14px); transform: translateY(-22%) scale(.98); } to { opacity: 1; filter: blur(0); transform: none; } }
+      @keyframes leave-phase-back { from { opacity: 1; filter: blur(0); transform: none; } to { opacity: 0; filter: blur(12px); transform: translateY(18%) scale(.98); } }
+      @keyframes enter-holo-forward { from { opacity: 0; filter: blur(9px); transform: translateX(28%) rotateY(-8deg) scale(.97); } to { opacity: 1; filter: blur(0); transform: none; } }
+      @keyframes leave-holo-forward { from { opacity: 1; transform: none; } to { opacity: 0; filter: blur(8px); transform: translateX(-22%) rotateY(7deg) scale(.97); } }
+      @keyframes enter-holo-back { from { opacity: 0; filter: blur(9px); transform: translateX(-28%) rotateY(8deg) scale(.97); } to { opacity: 1; filter: blur(0); transform: none; } }
+      @keyframes leave-holo-back { from { opacity: 1; transform: none; } to { opacity: 0; filter: blur(8px); transform: translateX(22%) rotateY(-7deg) scale(.97); } }
+      @keyframes enter-portal { from { opacity: 0; filter: blur(18px); clip-path: circle(0% at 50% 50%); transform: scale(.72) rotate(-1deg); } 55% { opacity: 1; } to { opacity: 1; filter: blur(0); clip-path: circle(82% at 50% 50%); transform: none; } }
+      @keyframes leave-portal { from { opacity: 1; filter: blur(0); clip-path: circle(82% at 50% 50%); transform: none; } to { opacity: 0; filter: blur(16px); clip-path: circle(0% at 50% 50%); transform: scale(.78) rotate(1deg); } }
+      @keyframes enter-rewind-back { from { opacity: 0; filter: blur(16px); transform: translateY(-14%) scale(1.06); } 42% { opacity: .55; } to { opacity: 1; filter: blur(0); transform: none; } }
+      @keyframes leave-rewind-back { from { opacity: 1; filter: blur(0); transform: none; } to { opacity: 0; filter: blur(10px); transform: translateY(12%) scale(.92); } }
+      @keyframes phase-flash { 0%,100% { opacity: 0; transform: translateY(0); } 40% { opacity: 1; } 65% { opacity: .3; transform: translateY(-14px); } }
+      @keyframes holo-flash { 0%,100% { opacity: 0; transform: translateX(-30%); } 45% { opacity: 1; } 75% { opacity: .25; transform: translateX(30%); } }
+      @keyframes portal-flash { 0%,100% { opacity: 0; transform: scale(.2); } 48% { opacity: 1; transform: scale(1.1); } 75% { opacity: .25; transform: scale(1.5); } }
+      @keyframes rewind-flash { 0%,100% { opacity: 0; transform: translateY(-10%); } 38% { opacity: .82; transform: translateY(0); } 72% { opacity: .2; transform: translateY(8%); } }
+
+      .site-footer {
+        display: none;
+      }
+
+      @media (max-width: 1120px) {
+        .scene {
+          padding-left: 32px;
+          padding-right: 32px;
+        }
+
+        .scene::before {
+          left: 32px;
+        }
+
+        #capabilities .capability-layout {
+          grid-template-columns: 1fr;
+          gap: 22px;
+        }
+
+        #capabilities .capability-grid {
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+
+        #scenarios {
+          grid-template-columns: 1fr;
+          gap: 22px;
+        }
+
+        .scene-rail {
+          width: calc(100% - 80px);
+        }
+      }
+
+      @media (max-width: 760px) {
+        .site-shell::before {
+          inset: 68px 0 0;
+        }
+
+        .scene-deck,
+        .scene {
+          height: 100dvh;
+        }
+
+        .scene {
+          display: grid;
+          align-content: center;
+          padding: 84px 18px 104px;
+        }
+
+        .scene::before {
+          top: 92px;
+          left: 18px;
+          font-size: 92px;
+        }
+
+        .hero.scene {
+          display: block;
+          min-height: 0;
+          padding: 104px 18px 98px;
+        }
+
+        .hero-content {
+          width: 100%;
+        }
+
+        .hero h1 {
+          font-size: clamp(48px, 14vw, 58px);
+        }
+
+        .hero h1 span {
+          font-size: 27px;
+        }
+
+        .hero-lead {
+          margin-top: 20px;
+        }
+
+        .hero-actions {
+          margin-top: 18px;
+        }
+
+        .agent-demo {
+          margin-top: 18px;
+          padding: 12px;
+        }
+
+        .demo-status {
+          margin: 8px 0;
+          padding: 7px 0;
+        }
+
+        .hero-character {
+          right: -62px;
+          bottom: 70px;
+          height: 260px;
+          opacity: .88;
+        }
+
+        #capabilities .capability-layout {
+          gap: 18px;
+        }
+
+        #capabilities .section-intro,
+        #scenarios .section-intro,
+        #architecture .section-intro {
+          margin-top: 9px;
+          line-height: 1.55;
+        }
+
+        #capabilities .text-link {
+          display: none;
+        }
+
+        #capabilities .capability-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+          margin: 0;
+          padding: 0;
+          overflow: visible;
+        }
+
+        #capabilities .capability-card {
+          min-height: 0;
+          padding: 13px;
+        }
+
+        #capabilities .capability-symbol {
+          width: 34px;
+          height: 34px;
+          margin-bottom: 10px;
+          font-size: 12px;
+        }
+
+        #capabilities .capability-card h3 {
+          font-size: 13px;
+        }
+
+        #capabilities .capability-card p {
+          margin-top: 6px;
+          font-size: 10px;
+          line-height: 1.5;
+        }
+
+        #capabilities .capability-proof {
+          margin-top: 8px;
+          padding-top: 7px;
+          font-size: 9px;
+        }
+
+        #scenarios {
+          gap: 16px;
+        }
+
+        #scenarios .case-study {
+          gap: 14px;
+          padding: 16px;
+        }
+
+        #scenarios .case-prompt {
+          padding-bottom: 12px;
+        }
+
+        #scenarios .case-prompt h3 {
+          margin: 9px 0 6px;
+          font-size: 17px;
+        }
+
+        #scenarios .case-prompt p,
+        #scenarios .case-step span {
+          font-size: 10px;
+        }
+
+        #scenarios .case-flow {
+          gap: 6px;
+        }
+
+        #scenarios .case-step {
+          grid-template-columns: 24px minmax(0, 1fr);
+          gap: 8px;
+          padding: 9px;
+        }
+
+        #scenarios .case-step strong {
+          font-size: 12px;
+        }
+
+        #architecture .section-heading {
+          margin-bottom: 15px;
+        }
+
+        #architecture .architecture-strip {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 1px;
+        }
+
+        #architecture .architecture-step {
+          min-height: 0;
+          padding: 12px;
+        }
+
+        #architecture .architecture-step:last-child {
+          grid-column: 1 / -1;
+        }
+
+        #architecture .architecture-step strong {
+          margin-top: 7px;
+          font-size: 12px;
+        }
+
+        #architecture .architecture-step span {
+          margin-top: 5px;
+          font-size: 9px;
+        }
+
+        .scene-counter {
+          top: 82px;
+          left: 18px;
+          font-size: 20px;
+        }
+
+        .scene-dots {
+          right: 7px;
+          gap: 12px;
+        }
+
+        .scene-rail {
+          bottom: 8px;
+          grid-template-columns: repeat(4, 1fr);
+          width: calc(100% - 20px);
+          border-radius: 9px;
+        }
+
+        .rail-button {
+          display: grid;
+          grid-template-columns: 1fr;
+          justify-items: center;
+          min-width: 0;
+          min-height: 58px;
+          gap: 2px;
+          padding: 6px 3px;
+          text-align: center;
+        }
+
+        .rail-button b {
+          font-size: 13px;
+        }
+
+        .rail-button span {
+          font-size: 9px;
+        }
+
+        .rail-button small {
+          display: none;
+        }
+      }
+
+      @media (max-height: 720px) and (min-width: 761px) {
+        .scene {
+          padding-top: 96px;
+          padding-bottom: 100px;
+        }
+
+        .hero-character {
+          bottom: 76px;
+          height: calc(100% - 142px);
+        }
+
+        .hero-lead {
+          margin-top: 22px;
+        }
+
+        .agent-demo {
+          margin-top: 16px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        .scene,
+        .transition-flash {
+          animation-duration: 1ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="site-shell">
+      <header class="site-header" id="siteHeader">
+        <div class="header-inner">
+          <a class="brand" href="#home" aria-label="Silver Wolf 首页">
+            <img src="assets/silver-wolf-logo.png" alt="" />
+            <span class="brand-copy">
+              <strong>SILVER WOLF</strong>
+              <span>AGENT SYSTEM</span>
+            </span>
+          </a>
+
+          <nav class="site-nav" id="siteNav" aria-label="展示页导航">
+            <a class="active" href="#home">首页</a>
+            <a href="#capabilities">核心能力</a>
+            <a href="#scenarios">应用场景</a>
+            <a href="#architecture">技术架构</a>
+          </nav>
+
+          <a class="header-action" href="/chat">开始对话</a>
+          <button
+            class="menu-toggle"
+            id="menuToggle"
+            type="button"
+            aria-label="展开导航"
+            aria-controls="siteNav"
+            aria-expanded="false"
+          >
+            ☰
+          </button>
+        </div>
+      </header>
+
+      <main class="scene-deck" id="sceneDeck">
+        <section class="hero scene is-active" id="home" data-index="01" aria-hidden="false">
+          <div class="hero-content">
+            <div class="eyebrow">Intelligent agent online</div>
+            <h1>SILVER WOLF<span>AI AGENT SYSTEM</span></h1>
+            <p class="hero-lead">会检索、会记忆，也会把复杂任务一步步做完。</p>
+            <p class="hero-subline">Search, memory and tool execution in one continuous conversation.</p>
+            <div class="hero-actions">
+              <a class="primary-action" href="/chat">开始对话 <span aria-hidden="true">→</span></a>
+              <a class="secondary-action" href="#scenarios">看看她能做什么 <span aria-hidden="true">›</span></a>
+            </div>
+            <div class="agent-demo" aria-label="银狼 Agent 任务演示">
+              <div class="demo-question"><strong>你</strong><span>明天去武汉，帮我结合天气安排半日路线。</span></div>
+              <div class="demo-status" aria-label="任务执行状态">
+                <span>检索天气</span><span>规划路线</span><span>保留来源</span>
+              </div>
+              <div class="demo-result"><strong>银狼</strong><span>上午以东湖骑行为主，午后转室内展馆；已按降雨概率准备备选路线。</span></div>
+            </div>
+          </div>
+
+          <img
+            class="hero-character"
+            src="assets/silver-wolf-showcase.png"
+            alt="银狼坐在设备箱上操作全息终端"
+          />
+
+        </section>
+
+        <section class="section scene" id="capabilities" data-index="02" aria-hidden="true" inert>
+          <div class="capability-layout">
+            <div class="section-heading">
+              <p class="section-label">核心能力</p>
+              <h2>强大的能力，超乎想象</h2>
+              <p class="section-intro">
+                Silver Wolf Agent 集成对话、检索、记忆与工具编排能力，为复杂任务提供稳定、连续的智能协作体验。
+              </p>
+              <a class="text-link" href="/chat">开始对话 <span aria-hidden="true">→</span></a>
+            </div>
+
+            <div class="capability-grid">
+              <article class="capability-card">
+                <span class="capability-symbol">•••</span>
+                <h3>自然语言交互</h3>
+                <p>理解你的意图与上下文，以清晰自然的方式持续沟通。</p>
+                <span class="capability-proof">多轮追问无需重复背景</span>
+              </article>
+              <article class="capability-card">
+                <span class="capability-symbol">◆</span>
+                <h3>多任务处理</h3>
+                <p>统一编排搜索、分析与生成任务，保持流程连续可追踪。</p>
+                <span class="capability-proof">执行步骤实时可见</span>
+              </article>
+              <article class="capability-card">
+                <span class="capability-symbol">AI</span>
+                <h3>个性化学习</h3>
+                <p>结合短期记忆与结构化工具记录，提供连贯的个性化服务。</p>
+                <span class="capability-proof">会话与摘要本地保存</span>
+              </article>
+              <article class="capability-card">
+                <span class="capability-symbol">✓</span>
+                <h3>数据安全保障</h3>
+                <p>本地持久化会话数据，并提供鉴权、取消与超时保护。</p>
+                <span class="capability-proof">支持停止、重试与来源检查</span>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="section scenarios scene" id="scenarios" data-index="03" aria-hidden="true" inert>
+          <div class="section-heading">
+            <p class="section-label">应用场景</p>
+            <h2>从日常对话到复杂任务</h2>
+            <p class="section-intro">一个界面，覆盖信息查询、知识协作与长期会话管理。</p>
+          </div>
+          <div class="case-study">
+            <div class="case-prompt">
+              <small>完整案例 / WUHAN HALF-DAY</small>
+              <h3>“明天去武汉，安排一条不赶路的半日路线。”</h3>
+              <p>银狼会先判断实时信息需求，再检索天气、组合地点，并把结果与来源保留在同一段会话里。</p>
+            </div>
+            <div class="case-flow" aria-label="案例执行过程">
+              <div class="case-step"><b>01</b><div><strong>确认条件</strong><span>半日、轻松步行、雨天可切换。</span></div></div>
+              <div class="case-step"><b>02</b><div><strong>联网执行</strong><span>检查天气与公开地点信息，展示流式进度。</span></div></div>
+              <div class="case-step"><b>03</b><div><strong>交付结果</strong><span>东湖路线、时间安排、备选室内点与来源入口。</span></div></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="section scene" id="architecture" data-index="04" aria-hidden="true" inert>
+          <div class="section-heading">
+            <p class="section-label">技术架构</p>
+            <h2>清晰、可靠、可持续扩展</h2>
+            <p class="section-intro">从意图判断到数据持久化，各层职责明确并具备自动化测试保护。</p>
+          </div>
+          <details class="architecture-details" open>
+            <summary>查看技术执行链路</summary>
+            <div class="architecture-strip">
+              <div class="architecture-step"><b>01</b><strong>意图路由</strong><span>识别对话、天气、新闻与连续追问。</span></div>
+              <div class="architecture-step"><b>02</b><strong>知识增强</strong><span>组合 Few-shot、RAG 与短期上下文。</span></div>
+              <div class="architecture-step"><b>03</b><strong>工具执行</strong><span>搜索、超时、重试、缓存与来源过滤。</span></div>
+              <div class="architecture-step"><b>04</b><strong>流式响应</strong><span>通过 SSE 输出内容、步骤和来源。</span></div>
+              <div class="architecture-step"><b>05</b><strong>持久记忆</strong><span>使用 SQLite 管理会话、消息与摘要。</span></div>
+            </div>
+          </details>
+        </section>
+      </main>
+
+      <div class="scene-counter" aria-live="polite" aria-atomic="true">
+        <span id="sceneCurrent">01</span><span>/ 04</span>
+      </div>
+
+      <nav class="scene-dots" aria-label="页面快速切换">
+        <button class="scene-dot active" type="button" data-scene="0" aria-label="首页" aria-current="page"></button>
+        <button class="scene-dot" type="button" data-scene="1" aria-label="核心能力"></button>
+        <button class="scene-dot" type="button" data-scene="2" aria-label="应用场景"></button>
+        <button class="scene-dot" type="button" data-scene="3" aria-label="技术架构"></button>
+      </nav>
+
+      <nav class="scene-rail" aria-label="全屏页面导航">
+        <button class="rail-button active" type="button" data-scene="0" aria-current="page"><b>01</b><span>首页<small>HOME</small></span></button>
+        <button class="rail-button" type="button" data-scene="1"><b>02</b><span>核心能力<small>CAPABILITIES</small></span></button>
+        <button class="rail-button" type="button" data-scene="2"><b>03</b><span>应用场景<small>SCENARIOS</small></span></button>
+        <button class="rail-button" type="button" data-scene="3"><b>04</b><span>技术架构<small>ARCHITECTURE</small></span></button>
+      </nav>
+
+      <div class="transition-flash" id="transitionFlash" aria-hidden="true"></div>
+
+      <footer class="site-footer">
+        <div><strong>SILVER WOLF AGENT SYSTEM</strong><br />An independent AI agent interface project.</div>
+        <div>© 2026 Silver Wolf Agent. Built for continuous intelligent collaboration.</div>
+      </footer>
+    </div>
+
+    <script>
+      const header = document.querySelector("#siteHeader");
+      const menuToggle = document.querySelector("#menuToggle");
+      const navigation = document.querySelector("#siteNav");
+      const navLinks = [...navigation.querySelectorAll("a")];
+      const sections = [...document.querySelectorAll(".scene")];
+      const sceneControls = [...document.querySelectorAll("[data-scene]")];
+      const sceneCurrent = document.querySelector("#sceneCurrent");
+      const transitionFlash = document.querySelector("#transitionFlash");
+      const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)");
+      const transitionDurations = { phase: 1400, holo: 1550, portal: 1800, rewind: 1650 };
+      const autoSceneInterval = 5000;
+      let currentIndex = Math.max(
+        0,
+        sections.findIndex((section) => `#${section.id}` === window.location.hash)
+      );
+      let animating = false;
+      let wheelTotal = 0;
+      let wheelResetTimer = 0;
+      let autoSceneTimer = 0;
+      let touchStartX = 0;
+      let touchStartY = 0;
+
+      function scheduleAutoScene() {
+        window.clearTimeout(autoSceneTimer);
+        if (document.hidden || sections.length < 2) return;
+        autoSceneTimer = window.setTimeout(() => {
+          goToScene((currentIndex + 1) % sections.length, { resetAuto: false });
+          scheduleAutoScene();
+        }, autoSceneInterval);
+      }
+
+      function updateHeader() {
+        header.classList.toggle("scrolled", currentIndex > 0);
+      }
+
+      function closeMenu() {
+        navigation.classList.remove("open");
+        menuToggle.setAttribute("aria-expanded", "false");
+        menuToggle.setAttribute("aria-label", "展开导航");
+      }
+
+      function setActiveNav(hash) {
+        const targetHash = hash || "#home";
+        navLinks.forEach((link) => {
+          link.classList.toggle("active", link.hash === targetHash);
+        });
+      }
+
+      function transitionFor(from, to) {
+        if (from === sections.length - 1 && to === 0) return "rewind";
+        const edge = Math.max(from, to);
+        if (edge <= 1) return "phase";
+        if (edge === 2) return "holo";
+        return "portal";
+      }
+
+      function updateSceneNavigation(index) {
+        const hash = `#${sections[index].id}`;
+        setActiveNav(hash);
+        sceneCurrent.textContent = String(index + 1).padStart(2, "0");
+        sceneControls.forEach((control) => {
+          const active = Number(control.dataset.scene) === index;
+          control.classList.toggle("active", active);
+          if (active) {
+            control.setAttribute("aria-current", "page");
+          } else {
+            control.removeAttribute("aria-current");
+          }
+        });
+        updateHeader();
+      }
+
+      function setSceneState(index) {
+        sections.forEach((section, sectionIndex) => {
+          const active = sectionIndex === index;
+          section.classList.toggle("is-active", active);
+          section.classList.remove("is-entering", "is-leaving");
+          section.setAttribute("aria-hidden", String(!active));
+          section.inert = !active;
+        });
+        currentIndex = index;
+        updateSceneNavigation(index);
+      }
+
+      function clearTransitionClasses(section) {
+        [...section.classList].forEach((className) => {
+          if (className.startsWith("enter-") || className.startsWith("leave-")) {
+            section.classList.remove(className);
+          }
+        });
+      }
+
+      function goToScene(targetIndex, { updateHash = true, resetAuto = true } = {}) {
+        if (resetAuto) scheduleAutoScene();
+        const nextIndex = Math.max(0, Math.min(sections.length - 1, targetIndex));
+        if (animating || nextIndex === currentIndex) return;
+
+        const outgoing = sections[currentIndex];
+        const incoming = sections[nextIndex];
+        const direction = nextIndex > currentIndex ? "forward" : "back";
+        const transition = transitionFor(currentIndex, nextIndex);
+        const duration = reducedMotion.matches ? 1 : transitionDurations[transition];
+
+        animating = true;
+        clearTransitionClasses(outgoing);
+        clearTransitionClasses(incoming);
+        outgoing.classList.remove("is-active");
+        outgoing.classList.add("is-leaving", `leave-${transition}-${direction}`);
+        incoming.classList.add("is-entering", `enter-${transition}-${direction}`);
+        incoming.setAttribute("aria-hidden", "false");
+        incoming.inert = false;
+        transitionFlash.className = `transition-flash ${transition}`;
+        updateSceneNavigation(nextIndex);
+
+        if (updateHash) {
+          history.replaceState(null, "", `#${incoming.id}`);
+        }
+
+        window.setTimeout(() => {
+          clearTransitionClasses(outgoing);
+          clearTransitionClasses(incoming);
+          outgoing.classList.remove("is-leaving");
+          outgoing.setAttribute("aria-hidden", "true");
+          outgoing.inert = true;
+          incoming.classList.remove("is-entering");
+          incoming.classList.add("is-active");
+          transitionFlash.className = "transition-flash";
+          currentIndex = nextIndex;
+          animating = false;
+        }, duration);
+      }
+
+      menuToggle.addEventListener("click", () => {
+        const open = navigation.classList.toggle("open");
+        menuToggle.setAttribute("aria-expanded", String(open));
+        menuToggle.setAttribute("aria-label", open ? "收起导航" : "展开导航");
+      });
+
+      navLinks.forEach((link) => {
+        link.addEventListener("click", (event) => {
+          event.preventDefault();
+          const targetIndex = sections.findIndex((section) => `#${section.id}` === link.hash);
+          setActiveNav(link.hash);
+          closeMenu();
+          if (targetIndex >= 0) goToScene(targetIndex);
+        });
+      });
+
+      sceneControls.forEach((control) => {
+        control.addEventListener("click", () => {
+          goToScene(Number(control.dataset.scene));
+        });
+      });
+
+      window.addEventListener("wheel", (event) => {
+        event.preventDefault();
+        if (animating) return;
+        wheelTotal += Math.abs(event.deltaY) >= Math.abs(event.deltaX)
+          ? event.deltaY
+          : event.deltaX;
+        window.clearTimeout(wheelResetTimer);
+        wheelResetTimer = window.setTimeout(() => { wheelTotal = 0; }, 150);
+        if (Math.abs(wheelTotal) < 44) return;
+        goToScene(currentIndex + (wheelTotal > 0 ? 1 : -1));
+        wheelTotal = 0;
+      }, { passive: false });
+
+      window.addEventListener("touchstart", (event) => {
+        const touch = event.changedTouches[0];
+        touchStartX = touch.clientX;
+        touchStartY = touch.clientY;
+      }, { passive: true });
+
+      window.addEventListener("touchmove", (event) => {
+        event.preventDefault();
+      }, { passive: false });
+
+      window.addEventListener("touchend", (event) => {
+        if (animating) return;
+        const touch = event.changedTouches[0];
+        const deltaX = touch.clientX - touchStartX;
+        const deltaY = touch.clientY - touchStartY;
+        const primaryDelta = Math.abs(deltaY) >= Math.abs(deltaX) ? deltaY : deltaX;
+        if (Math.abs(primaryDelta) < 48) return;
+        goToScene(currentIndex + (primaryDelta < 0 ? 1 : -1));
+      }, { passive: true });
+
+      window.addEventListener("keydown", (event) => {
+        if (event.altKey || event.ctrlKey || event.metaKey) return;
+        const forwardKeys = ["ArrowDown", "ArrowRight", "PageDown", " "];
+        const backKeys = ["ArrowUp", "ArrowLeft", "PageUp"];
+        if (forwardKeys.includes(event.key)) {
+          event.preventDefault();
+          goToScene(currentIndex + 1);
+        } else if (backKeys.includes(event.key)) {
+          event.preventDefault();
+          goToScene(currentIndex - 1);
+        } else if (event.key === "Home") {
+          event.preventDefault();
+          goToScene(0);
+        } else if (event.key === "End") {
+          event.preventDefault();
+          goToScene(sections.length - 1);
+        }
+      });
+
+      window.addEventListener("hashchange", () => {
+        setActiveNav(window.location.hash);
+        const targetIndex = sections.findIndex(
+          (section) => `#${section.id}` === window.location.hash
+        );
+        if (targetIndex >= 0) goToScene(targetIndex, { updateHash: false });
+      });
+      window.addEventListener("resize", () => {
+        if (window.innerWidth > 760) closeMenu();
+      });
+      document.addEventListener("visibilitychange", scheduleAutoScene);
+
+      setSceneState(currentIndex);
+      scheduleAutoScene();
+    </script>
+  </body>
+</html>

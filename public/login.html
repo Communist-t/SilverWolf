@@ -1,0 +1,1066 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta
+      name="description"
+      content="登录 Silver Wolf AI Agent System，连接你的智能伙伴。"
+    />
+    <title>登录 | Silver Wolf AI Agent System</title>
+    <link rel="stylesheet" href="/vendor/phosphor/style.css" />
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #14132b;
+        --muted: #77739a;
+        --soft: #9b96be;
+        --purple: #7047f6;
+        --purple-deep: #5531dc;
+        --purple-pale: #eeeaff;
+        --line: rgba(91, 70, 178, 0.15);
+        --surface: rgba(255, 255, 255, 0.72);
+        --danger: #c83f5d;
+        --success: #268b68;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        width: 100%;
+        min-width: 0;
+        min-height: 100%;
+      }
+
+      body {
+        margin: 0;
+        overflow-x: hidden;
+        color: var(--ink);
+        background: #f8f7ff url("/assets/silver-wolf-login-scene.jpg") center / cover fixed;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+          "Segoe UI", "Microsoft YaHei", sans-serif;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button,
+      a {
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      button {
+        border: 0;
+      }
+
+      .login-shell {
+        position: relative;
+        min-height: 100vh;
+        min-height: 100dvh;
+        overflow: hidden;
+        isolation: isolate;
+      }
+
+      .login-shell::before {
+        content: "";
+        position: absolute;
+        z-index: -1;
+        inset: 0;
+        background: rgba(248, 247, 255, 0.15);
+        pointer-events: none;
+      }
+
+      .brand-lockup {
+        position: absolute;
+        z-index: 4;
+        top: 26px;
+        left: 34px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        color: #111126;
+        text-decoration: none;
+      }
+
+      .brand-lockup img {
+        width: 43px;
+        height: 38px;
+        object-fit: contain;
+        image-rendering: auto;
+      }
+
+      .brand-copy {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        min-height: 48px;
+      }
+
+      .brand-name {
+        display: block;
+        font-size: 20px;
+        font-weight: 900;
+        line-height: 1.05;
+        letter-spacing: 0.035em;
+      }
+
+      .brand-subtitle {
+        display: block;
+        margin-top: 5px;
+        color: #474467;
+        font-size: 9px;
+        font-weight: 700;
+        letter-spacing: 0.34em;
+      }
+
+      .security-label {
+        position: absolute;
+        z-index: 3;
+        top: 34px;
+        right: 42px;
+        color: rgba(88, 74, 159, 0.52);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+      }
+
+      .security-label span {
+        display: inline-block;
+        width: 7px;
+        height: 7px;
+        margin-left: 3px;
+        background: rgba(112, 71, 246, 0.22);
+      }
+
+      .content-grid {
+        position: relative;
+        z-index: 2;
+        display: grid;
+        grid-template-columns: minmax(540px, 47%) minmax(560px, 53%);
+        width: min(1500px, 100%);
+        min-height: 100vh;
+        min-height: 100dvh;
+        margin: 0 auto;
+      }
+
+      .login-column {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        min-width: 0;
+        padding: 126px 20px 38px 136px;
+      }
+
+      .headline {
+        width: min(464px, 100%);
+        margin: 0 0 8px;
+        text-align: center;
+      }
+
+      .headline::before {
+        content: "SILVER WOLF";
+        display: block;
+        height: 40px;
+        margin-bottom: -31px;
+        color: rgba(112, 71, 246, 0.075);
+        font-size: clamp(46px, 5.3vw, 76px);
+        font-style: italic;
+        font-weight: 900;
+        line-height: 0.8;
+        letter-spacing: 0.03em;
+        white-space: nowrap;
+        transform: translateX(-54px);
+      }
+
+      .headline h1 {
+        position: relative;
+        margin: 0;
+        color: #1d1c75;
+        font-size: clamp(40px, 4.5vw, 64px);
+        font-style: italic;
+        font-weight: 900;
+        line-height: 1;
+        letter-spacing: 0.08em;
+        white-space: nowrap;
+        text-shadow: 0 4px 18px rgba(71, 53, 172, 0.12);
+      }
+
+      .headline p {
+        margin: 8px 0 0;
+        color: #8c6cf0;
+        font-size: 16px;
+        font-weight: 800;
+        letter-spacing: 0.34em;
+      }
+
+      .auth-card {
+        width: min(464px, 100%);
+        padding: 30px 34px 22px;
+        border: 1px solid rgba(255, 255, 255, 0.96);
+        border-radius: 22px;
+        background: var(--surface);
+        box-shadow:
+          0 24px 70px rgba(63, 54, 110, 0.13),
+          inset 0 1px 0 rgba(255, 255, 255, 1),
+          inset 0 0 34px rgba(255, 255, 255, 0.3);
+        -webkit-backdrop-filter: blur(30px) saturate(118%);
+        backdrop-filter: blur(30px) saturate(118%);
+      }
+
+      .card-heading {
+        display: grid;
+        grid-template-columns: 58px minmax(0, 1fr);
+        gap: 14px;
+        align-items: center;
+        margin-bottom: 24px;
+      }
+
+      .card-mark {
+        display: grid;
+        place-items: center;
+        width: 58px;
+        height: 58px;
+        border: 1px solid rgba(112, 71, 246, 0.18);
+        border-radius: 7px;
+        background: rgba(250, 249, 255, 0.9);
+        box-shadow: 0 7px 18px rgba(79, 56, 188, 0.09);
+      }
+
+      .card-mark img {
+        width: 32px;
+        height: 28px;
+        object-fit: contain;
+      }
+
+      .card-heading-copy {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        min-height: 58px;
+      }
+
+      .eyebrow {
+        margin: 0 0 4px;
+        color: #7b70bd;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .card-heading h2 {
+        margin: 0;
+        font-size: 25px;
+        line-height: 1.2;
+        letter-spacing: 0.04em;
+      }
+
+      .card-heading .subtitle {
+        margin: 6px 0 0;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .mode-tabs {
+        display: none;
+        grid-template-columns: 1fr 1fr;
+        gap: 5px;
+        margin-bottom: 16px;
+        padding: 4px;
+        border-radius: 10px;
+        background: rgba(112, 71, 246, 0.07);
+      }
+
+      .mode-tab {
+        min-height: 34px;
+        border-radius: 7px;
+        color: var(--muted);
+        background: transparent;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .mode-tab[aria-selected="true"] {
+        color: var(--purple-deep);
+        background: rgba(255, 255, 255, 0.94);
+        box-shadow: 0 3px 12px rgba(78, 53, 181, 0.09);
+      }
+
+      .field-stack {
+        display: grid;
+        gap: 11px;
+      }
+
+      .field {
+        position: relative;
+        display: flex;
+        align-items: center;
+        min-height: 49px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: rgba(255, 255, 255, 0.58);
+        transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+      }
+
+      .field:focus-within {
+        border-color: rgba(112, 71, 246, 0.58);
+        background: rgba(255, 255, 255, 0.92);
+        box-shadow: 0 0 0 3px rgba(112, 71, 246, 0.1);
+      }
+
+      .field > i {
+        flex: 0 0 auto;
+        margin-left: 17px;
+        color: #8d78e5;
+        font-size: 19px;
+      }
+
+      .field input {
+        width: 100%;
+        min-width: 0;
+        height: 47px;
+        padding: 0 14px;
+        border: 0;
+        outline: 0;
+        color: var(--ink);
+        background: transparent;
+        font-size: 13px;
+      }
+
+      .field input::placeholder {
+        color: #9490b2;
+      }
+
+      .field-action {
+        flex: 0 0 auto;
+        min-width: 46px;
+        min-height: 34px;
+        margin-right: 7px;
+        padding: 0 8px;
+        color: var(--purple);
+        background: transparent;
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .field-action.icon-only {
+        min-width: 36px;
+        padding: 0;
+        font-size: 19px;
+      }
+
+      .form-options {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 14px;
+        margin: 15px 0 16px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .remember-label {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        cursor: pointer;
+      }
+
+      .remember-label input {
+        position: absolute;
+        opacity: 0;
+        pointer-events: none;
+      }
+
+      .switch {
+        position: relative;
+        width: 30px;
+        height: 18px;
+        border-radius: 9px;
+        background: #d8d3ed;
+        transition: background 150ms ease;
+      }
+
+      .switch::after {
+        content: "";
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #fff;
+        box-shadow: 0 1px 4px rgba(48, 35, 104, 0.25);
+        transition: transform 150ms ease;
+      }
+
+      .remember-label input:checked + .switch {
+        background: var(--purple);
+      }
+
+      .remember-label input:checked + .switch::after {
+        transform: translateX(12px);
+      }
+
+      .text-button {
+        padding: 4px 0;
+        color: #8a78d7;
+        background: transparent;
+        cursor: pointer;
+        font-size: inherit;
+      }
+
+      .submit-button {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        width: 100%;
+        min-height: 50px;
+        padding: 0 17px 0 45px;
+        border-radius: 9px;
+        color: #fff;
+        background: var(--purple);
+        box-shadow: 0 12px 26px rgba(98, 55, 232, 0.28);
+        cursor: pointer;
+        font-size: 15px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        transition: transform 150ms ease, background 150ms ease, box-shadow 150ms ease;
+      }
+
+      .submit-button:hover {
+        background: var(--purple-deep);
+        box-shadow: 0 14px 30px rgba(83, 43, 207, 0.34);
+        transform: translateY(-1px);
+      }
+
+      .submit-button:active {
+        transform: translateY(1px);
+      }
+
+      .submit-button:disabled {
+        cursor: wait;
+        opacity: 0.68;
+        transform: none;
+      }
+
+      .submit-button i {
+        font-size: 20px;
+      }
+
+      .form-message {
+        min-height: 18px;
+        margin: 10px 0 0;
+        color: var(--danger);
+        font-size: 12px;
+        line-height: 1.5;
+        text-align: center;
+      }
+
+      .form-message.success {
+        color: var(--success);
+      }
+
+      .social-divider {
+        display: grid;
+        grid-template-columns: 1fr auto 1fr;
+        gap: 12px;
+        align-items: center;
+        margin: 6px 0 12px;
+        color: #9691b1;
+        font-size: 11px;
+      }
+
+      .social-divider::before,
+      .social-divider::after {
+        content: "";
+        height: 1px;
+        background: rgba(91, 70, 178, 0.12);
+      }
+
+      .social-row {
+        display: flex;
+        justify-content: center;
+        gap: 27px;
+      }
+
+      .social-button {
+        display: grid;
+        place-items: center;
+        width: 48px;
+        height: 48px;
+        border: 1px solid rgba(91, 70, 178, 0.08);
+        border-radius: 50%;
+        color: #6545df;
+        background: rgba(255, 255, 255, 0.9);
+        box-shadow: 0 7px 18px rgba(69, 50, 141, 0.08);
+        cursor: pointer;
+        transition: transform 150ms ease, border-color 150ms ease;
+      }
+
+      .social-button:hover {
+        border-color: rgba(112, 71, 246, 0.32);
+        transform: translateY(-2px);
+      }
+
+      .social-button.brand img {
+        width: 20px;
+        height: 20px;
+      }
+
+      .social-button:first-child img {
+        width: 23px;
+        height: 25px;
+      }
+
+      .card-footer {
+        margin: 17px -34px -22px;
+        padding: 15px 20px;
+        border-top: 1px solid rgba(91, 70, 178, 0.1);
+        color: var(--muted);
+        font-size: 12px;
+        text-align: center;
+      }
+
+      .card-footer button {
+        margin-left: 7px;
+        color: var(--purple);
+        background: transparent;
+        cursor: pointer;
+        font-weight: 800;
+      }
+
+      .character-column {
+        position: relative;
+        min-width: 0;
+        min-height: 100vh;
+        min-height: 100dvh;
+      }
+
+      .character-column::before {
+        content: none;
+      }
+
+      .diagnostics {
+        position: absolute;
+        z-index: 1;
+        left: 28px;
+        bottom: 54px;
+        display: grid;
+        gap: 20px;
+        color: rgba(93, 77, 166, 0.53);
+        font-size: 9px;
+        line-height: 1.65;
+      }
+
+      .diagnostics strong {
+        display: block;
+        color: rgba(93, 77, 166, 0.67);
+        font-weight: 700;
+      }
+
+      .system-ready {
+        display: none;
+      }
+
+      .toast {
+        position: fixed;
+        z-index: 20;
+        left: 50%;
+        bottom: 24px;
+        max-width: min(90vw, 440px);
+        padding: 11px 16px;
+        border: 1px solid rgba(112, 71, 246, 0.18);
+        border-radius: 10px;
+        color: #fff;
+        background: rgba(37, 29, 76, 0.9);
+        box-shadow: 0 12px 30px rgba(40, 30, 85, 0.24);
+        font-size: 12px;
+        transform: translateX(-50%);
+        backdrop-filter: blur(12px);
+      }
+
+      [hidden] {
+        display: none !important;
+      }
+
+      :focus-visible {
+        outline: 3px solid rgba(112, 71, 246, 0.35);
+        outline-offset: 3px;
+      }
+
+      @media (max-width: 1150px) {
+        .content-grid {
+          grid-template-columns: minmax(480px, 52%) minmax(420px, 48%);
+        }
+
+        .login-column {
+          padding-left: 70px;
+        }
+
+        .diagnostics,
+        .system-ready {
+          display: none;
+        }
+      }
+
+      @media (max-width: 840px) {
+        body {
+          background-image: url("/assets/silver-wolf-background.png");
+          background-position: 34% center;
+        }
+
+        .login-shell {
+          overflow: auto;
+        }
+
+        .brand-lockup {
+          top: 20px;
+          left: 22px;
+        }
+
+        .security-label {
+          top: 29px;
+          right: 22px;
+        }
+
+        .content-grid {
+          display: block;
+          min-height: 100dvh;
+        }
+
+        .login-column {
+          min-height: 100dvh;
+          padding: 96px 18px 32px;
+        }
+
+        .character-column {
+          display: none;
+        }
+
+        .headline::before {
+          transform: none;
+        }
+      }
+
+      @media (max-width: 520px) {
+        .brand-lockup img {
+          width: 34px;
+          height: 30px;
+        }
+
+        .brand-name {
+          font-size: 15px;
+        }
+
+        .brand-subtitle {
+          font-size: 7px;
+        }
+
+        .security-label {
+          display: none;
+        }
+
+        .login-column {
+          justify-content: flex-start;
+          padding-top: 88px;
+        }
+
+        .headline {
+          margin-bottom: 14px;
+        }
+
+        .headline h1 {
+          font-size: 37px;
+          letter-spacing: 0.045em;
+        }
+
+        .headline::before {
+          height: 32px;
+          margin-bottom: -25px;
+          font-size: 41px;
+        }
+
+        .headline p {
+          font-size: 12px;
+          letter-spacing: 0.25em;
+        }
+
+        .auth-card {
+          padding: 24px 20px 18px;
+          border-radius: 18px;
+        }
+
+        .card-heading {
+          grid-template-columns: 50px minmax(0, 1fr);
+          gap: 13px;
+          margin-bottom: 18px;
+        }
+
+        .card-mark {
+          width: 50px;
+          height: 50px;
+        }
+
+        .card-heading h2 {
+          font-size: 21px;
+        }
+
+        .social-row {
+          gap: 18px;
+        }
+
+        .card-footer {
+          margin: 16px -20px -18px;
+        }
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          scroll-behavior: auto !important;
+          transition-duration: 0.01ms !important;
+          animation-duration: 0.01ms !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="login-shell">
+      <a class="brand-lockup" href="/" aria-label="返回 Silver Wolf 首页">
+        <img src="/assets/silver-wolf-logo-trimmed.png" alt="" />
+        <span class="brand-copy">
+          <span class="brand-name">SILVER WOLF</span>
+          <span class="brand-subtitle">AGENT SYSTEM</span>
+        </span>
+      </a>
+
+      <div class="security-label" aria-hidden="true">
+        // SECURE ACCESS PROTOCOL
+        <span></span><span></span><span></span><span></span>
+      </div>
+
+      <div class="content-grid">
+        <section class="login-column" aria-labelledby="pageTitle">
+          <header class="headline">
+            <h1 id="pageTitle">SILVER WOLF</h1>
+            <p>AI AGENT SYSTEM</p>
+          </header>
+
+          <section class="auth-card" aria-labelledby="authTitle">
+            <header class="card-heading">
+              <span class="card-mark" aria-hidden="true">
+                <img src="/assets/silver-wolf-logo-trimmed.png" alt="" />
+              </span>
+              <span class="card-heading-copy">
+                <p class="eyebrow" id="authEyebrow">WELCOME BACK,</p>
+                <h2 id="authTitle">欢迎回来，特工！</h2>
+                <p class="subtitle" id="authSubtitle">连接你的智能伙伴，开启无限可能。</p>
+              </span>
+            </header>
+
+            <div class="mode-tabs" role="tablist" aria-label="账号操作">
+              <button class="mode-tab" id="loginTab" type="button" role="tab" aria-selected="true">登录</button>
+              <button class="mode-tab" id="registerTab" type="button" role="tab" aria-selected="false">注册</button>
+            </div>
+
+            <form id="authForm" novalidate>
+              <div id="loginFields" class="field-stack">
+                <label class="field">
+                  <i class="ph ph-user" aria-hidden="true"></i>
+                  <input id="loginAccount" name="account" type="email" autocomplete="username" placeholder="用户名 / 邮箱 / 手机号" aria-label="用户名、邮箱或手机号" />
+                </label>
+                <label class="field">
+                  <i class="ph ph-lock" aria-hidden="true"></i>
+                  <input id="loginPassword" name="password" type="password" autocomplete="current-password" placeholder="密码" aria-label="密码" />
+                  <button class="field-action icon-only password-toggle" type="button" data-target="loginPassword" aria-label="显示密码">
+                    <i class="ph ph-eye-slash" aria-hidden="true"></i>
+                  </button>
+                </label>
+              </div>
+
+              <div id="registerFields" class="field-stack" hidden>
+                <label class="field">
+                  <i class="ph ph-envelope" aria-hidden="true"></i>
+                  <input id="registerEmail" name="email" type="email" autocomplete="email" placeholder="邮箱地址" aria-label="注册邮箱" />
+                </label>
+                <label class="field">
+                  <i class="ph ph-shield-check" aria-hidden="true"></i>
+                  <input id="registerCode" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="邮箱验证码" aria-label="邮箱验证码" />
+                  <button class="field-action" id="sendCodeButton" type="button">发送验证码</button>
+                </label>
+                <label class="field">
+                  <i class="ph ph-lock" aria-hidden="true"></i>
+                  <input id="registerPassword" name="registerPassword" type="password" autocomplete="new-password" placeholder="设置密码（至少 6 位）" aria-label="设置密码" />
+                  <button class="field-action icon-only password-toggle" type="button" data-target="registerPassword" aria-label="显示密码">
+                    <i class="ph ph-eye-slash" aria-hidden="true"></i>
+                  </button>
+                </label>
+                <label class="field">
+                  <i class="ph ph-key" aria-hidden="true"></i>
+                  <input id="confirmPassword" name="confirmPassword" type="password" autocomplete="new-password" placeholder="确认密码" aria-label="确认密码" />
+                </label>
+              </div>
+
+              <div class="form-options">
+                <label class="remember-label">
+                  <input id="rememberAccount" type="checkbox" checked />
+                  <span class="switch" aria-hidden="true"></span>
+                  <span>记住我</span>
+                </label>
+                <button class="text-button" id="forgotPassword" type="button">忘记密码？</button>
+              </div>
+
+              <button class="submit-button" id="submitButton" type="submit">
+                <span id="submitText">登录</span>
+                <i class="ph ph-arrow-right" aria-hidden="true"></i>
+              </button>
+              <p class="form-message" id="formMessage" role="status" aria-live="polite"></p>
+            </form>
+
+            <div class="social-divider"><span>其他登录方式</span></div>
+            <div class="social-row" aria-label="其他登录方式">
+              <button class="social-button" type="button" data-provider="Silver Wolf" aria-label="使用 Silver Wolf 通行证登录">
+                <img src="/assets/silver-wolf-logo.png" alt="" />
+              </button>
+              <button class="social-button brand" type="button" data-provider="Google" aria-label="使用 Google 登录">
+                <img src="/assets/icons/google.svg" alt="" />
+              </button>
+              <button class="social-button brand" type="button" data-provider="Microsoft" aria-label="使用 Microsoft 登录">
+                <img src="/assets/icons/microsoft.svg" alt="" />
+              </button>
+              <button class="social-button brand" type="button" data-provider="Discord" aria-label="使用 Discord 登录">
+                <img src="/assets/icons/discord.svg" alt="" />
+              </button>
+            </div>
+
+            <footer class="card-footer">
+              <span id="modePrompt">没有账号？</span>
+              <button id="modeSwitch" type="button">立即注册</button>
+            </footer>
+          </section>
+        </section>
+
+        <section class="character-column" aria-label="银狼角色展示">
+          <div class="system-ready" aria-hidden="true">// SYSTEM<br />READY<br />▪ ▪ ▪ ▪ ▪</div>
+        </section>
+      </div>
+
+      <aside class="diagnostics" aria-hidden="true">
+        <span><strong>// AGENT ID</strong>SW_0420</span>
+        <span><strong>// CONNECTION</strong>STABLE</span>
+        <span><strong>// LATENCY</strong>10ms</span>
+      </aside>
+      <div class="toast" id="toast" role="status" hidden></div>
+    </main>
+
+    <script>
+      const USER_TOKEN_KEY = "silver-wolf-user-token";
+      const USER_INFO_KEY = "silver-wolf-user-info";
+      const REMEMBERED_ACCOUNT_KEY = "silver-wolf-remembered-account";
+
+      const authForm = document.querySelector("#authForm");
+      const loginTab = document.querySelector("#loginTab");
+      const registerTab = document.querySelector("#registerTab");
+      const loginFields = document.querySelector("#loginFields");
+      const registerFields = document.querySelector("#registerFields");
+      const loginAccount = document.querySelector("#loginAccount");
+      const loginPassword = document.querySelector("#loginPassword");
+      const registerEmail = document.querySelector("#registerEmail");
+      const registerCode = document.querySelector("#registerCode");
+      const registerPassword = document.querySelector("#registerPassword");
+      const confirmPassword = document.querySelector("#confirmPassword");
+      const rememberAccount = document.querySelector("#rememberAccount");
+      const sendCodeButton = document.querySelector("#sendCodeButton");
+      const forgotPassword = document.querySelector("#forgotPassword");
+      const submitButton = document.querySelector("#submitButton");
+      const submitText = document.querySelector("#submitText");
+      const formMessage = document.querySelector("#formMessage");
+      const authEyebrow = document.querySelector("#authEyebrow");
+      const authTitle = document.querySelector("#authTitle");
+      const authSubtitle = document.querySelector("#authSubtitle");
+      const modePrompt = document.querySelector("#modePrompt");
+      const modeSwitch = document.querySelector("#modeSwitch");
+      const toast = document.querySelector("#toast");
+
+      let mode = "login";
+      let sendCodeCountdown = 0;
+      let sendCodeTimer = null;
+      let toastTimer = null;
+
+      const nextParam = new URLSearchParams(location.search).get("next");
+      const nextUrl = nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//")
+        ? nextParam
+        : "/chat";
+
+      function showMessage(message, kind = "error") {
+        formMessage.textContent = message;
+        formMessage.classList.toggle("success", kind === "success");
+      }
+
+      function showToast(message) {
+        toast.textContent = message;
+        toast.hidden = false;
+        clearTimeout(toastTimer);
+        toastTimer = setTimeout(() => {
+          toast.hidden = true;
+        }, 2800);
+      }
+
+      function setMode(nextMode) {
+        mode = nextMode;
+        const isLogin = mode === "login";
+        loginFields.hidden = !isLogin;
+        registerFields.hidden = isLogin;
+        loginTab.setAttribute("aria-selected", String(isLogin));
+        registerTab.setAttribute("aria-selected", String(!isLogin));
+        forgotPassword.hidden = !isLogin;
+        authEyebrow.textContent = isLogin ? "WELCOME BACK," : "NEW AGENT,";
+        authTitle.textContent = isLogin ? "欢迎回来，特工！" : "创建你的特工档案";
+        authSubtitle.textContent = isLogin
+          ? "连接你的智能伙伴，开启无限可能。"
+          : "完成验证，即刻接入 Silver Wolf Agent。";
+        submitText.textContent = isLogin ? "登录" : "注册";
+        modePrompt.textContent = isLogin ? "没有账号？" : "已有账号？";
+        modeSwitch.textContent = isLogin ? "立即注册" : "返回登录";
+        showMessage("");
+        setTimeout(() => (isLogin ? loginAccount : registerEmail).focus(), 0);
+      }
+
+      async function parseResponse(response) {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "请求失败，请稍后重试");
+        return data;
+      }
+
+      function saveAuthentication(data, account) {
+        localStorage.setItem(USER_TOKEN_KEY, data.token);
+        localStorage.setItem(USER_INFO_KEY, JSON.stringify(data.user));
+        if (rememberAccount.checked) {
+          localStorage.setItem(REMEMBERED_ACCOUNT_KEY, account);
+        } else {
+          localStorage.removeItem(REMEMBERED_ACCOUNT_KEY);
+        }
+      }
+
+      authForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        submitButton.disabled = true;
+        showMessage("");
+
+        try {
+          if (mode === "login") {
+            const account = loginAccount.value.trim();
+            const password = loginPassword.value;
+            if (!account || !password) throw new Error("请输入账号和密码");
+
+            const data = await parseResponse(await fetch("/auth/login", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ account, password }),
+            }));
+            saveAuthentication(data, account);
+            showMessage("认证成功，正在接入系统…", "success");
+            setTimeout(() => location.assign(nextUrl), 420);
+          } else {
+            const email = registerEmail.value.trim();
+            const code = registerCode.value.trim();
+            const password = registerPassword.value;
+            const confirmation = confirmPassword.value;
+            if (!email || !code || !password || !confirmation) {
+              throw new Error("请填写所有注册信息");
+            }
+            if (password.length < 6) throw new Error("密码至少需要 6 位");
+            if (password !== confirmation) throw new Error("两次密码输入不一致");
+
+            const data = await parseResponse(await fetch("/auth/register", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ email, code, password, confirmPassword: confirmation }),
+            }));
+            saveAuthentication(data, email);
+            showMessage("档案创建完成，正在进入系统…", "success");
+            setTimeout(() => location.assign(nextUrl), 420);
+          }
+        } catch (error) {
+          showMessage(error instanceof Error ? error.message : "操作失败，请重试");
+        } finally {
+          submitButton.disabled = false;
+        }
+      });
+
+      sendCodeButton.addEventListener("click", async () => {
+        const email = registerEmail.value.trim();
+        if (!email) {
+          showMessage("请先输入邮箱地址");
+          registerEmail.focus();
+          return;
+        }
+        if (sendCodeCountdown > 0) return;
+
+        sendCodeButton.disabled = true;
+        showMessage("");
+        try {
+          await parseResponse(await fetch("/auth/send-code", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email }),
+          }));
+          showMessage("验证码已发送，请检查邮箱", "success");
+          sendCodeCountdown = 60;
+          sendCodeButton.textContent = `${sendCodeCountdown}s`;
+          sendCodeTimer = setInterval(() => {
+            sendCodeCountdown -= 1;
+            sendCodeButton.textContent = `${sendCodeCountdown}s`;
+            if (sendCodeCountdown <= 0) {
+              clearInterval(sendCodeTimer);
+              sendCodeTimer = null;
+              sendCodeButton.disabled = false;
+              sendCodeButton.textContent = "发送验证码";
+            }
+          }, 1000);
+        } catch (error) {
+          showMessage(error instanceof Error ? error.message : "验证码发送失败");
+          sendCodeButton.disabled = false;
+        }
+      });
+
+      document.querySelectorAll(".password-toggle").forEach((button) => {
+        button.addEventListener("click", () => {
+          const input = document.getElementById(button.dataset.target);
+          const reveal = input.type === "password";
+          input.type = reveal ? "text" : "password";
+          button.setAttribute("aria-label", reveal ? "隐藏密码" : "显示密码");
+          button.querySelector("i").className = reveal ? "ph ph-eye" : "ph ph-eye-slash";
+        });
+      });
+
+      loginTab.addEventListener("click", () => setMode("login"));
+      registerTab.addEventListener("click", () => setMode("register"));
+      modeSwitch.addEventListener("click", () => setMode(mode === "login" ? "register" : "login"));
+      forgotPassword.addEventListener("click", () => {
+        showToast("密码重置功能尚未配置，请联系系统管理员");
+      });
+      document.querySelectorAll(".social-button").forEach((button) => {
+        button.addEventListener("click", () => {
+          showToast(`${button.dataset.provider} 登录通道尚未配置`);
+        });
+      });
+
+      const rememberedAccount = localStorage.getItem(REMEMBERED_ACCOUNT_KEY);
+      if (rememberedAccount) loginAccount.value = rememberedAccount;
+      if (localStorage.getItem(USER_TOKEN_KEY)) {
+        showMessage("检测到有效登录信息，可直接进入系统", "success");
+        submitText.textContent = "重新登录";
+      }
+    </script>
+  </body>
+</html>
