@@ -731,6 +731,148 @@
           animation-duration: 0.01ms !important;
         }
       }
+
+      html[data-theme="dark"] {
+        color-scheme: dark;
+        --ink: #e8e6f0;
+        --muted: #9a96b5;
+        --soft: #7d79a0;
+        --purple: #9a88ff;
+        --purple-deep: #8874ff;
+        --purple-pale: #2d2947;
+        --line: rgba(120, 100, 200, 0.15);
+        --surface: rgba(27, 28, 38, 0.88);
+        --danger: #f07883;
+        --success: #56c99d;
+      }
+
+      html[data-theme="dark"] body {
+        background: #111218;
+      }
+
+      html[data-theme="dark"] .login-shell::before {
+        background: rgba(0, 0, 0, 0.3);
+      }
+
+      html[data-theme="dark"] .brand-lockup {
+        color: #d8d6e8;
+      }
+
+      html[data-theme="dark"] .brand-subtitle {
+        color: #928eb0;
+      }
+
+      html[data-theme="dark"] .security-label {
+        color: rgba(140, 120, 210, 0.4);
+      }
+
+      html[data-theme="dark"] .headline::before {
+        color: rgba(154, 136, 255, 0.1);
+      }
+
+      html[data-theme="dark"] .headline h1 {
+        color: #b8aeff;
+        text-shadow: 0 4px 18px rgba(80, 60, 180, 0.25);
+      }
+
+      html[data-theme="dark"] .headline p {
+        color: #9a88ff;
+      }
+
+      html[data-theme="dark"] .auth-card {
+        border-color: rgba(60, 50, 100, 0.6);
+        background: rgba(27, 28, 38, 0.88);
+        box-shadow:
+          0 24px 70px rgba(0, 0, 0, 0.3),
+          inset 0 1px 0 rgba(60, 50, 100, 0.3),
+          inset 0 0 34px rgba(40, 35, 65, 0.2);
+      }
+
+      html[data-theme="dark"] .card-mark {
+        border-color: rgba(120, 100, 200, 0.2);
+        background: rgba(35, 30, 55, 0.8);
+        box-shadow: 0 7px 18px rgba(0, 0, 0, 0.2);
+      }
+
+      html[data-theme="dark"] .eyebrow {
+        color: #8a7ec8;
+      }
+
+      html[data-theme="dark"] .mode-tabs {
+        background: rgba(100, 80, 180, 0.1);
+      }
+
+      html[data-theme="dark"] .mode-tab[aria-selected="true"] {
+        color: #b8aeff;
+        background: rgba(40, 38, 55, 0.94);
+        box-shadow: 0 3px 12px rgba(0, 0, 0, 0.15);
+      }
+
+      html[data-theme="dark"] .field {
+        border-color: rgba(80, 70, 140, 0.2);
+        background: rgba(35, 33, 48, 0.7);
+      }
+
+      html[data-theme="dark"] .field:focus-within {
+        border-color: rgba(154, 136, 255, 0.5);
+        background: rgba(35, 33, 48, 0.92);
+        box-shadow: 0 0 0 3px rgba(154, 136, 255, 0.1);
+      }
+
+      html[data-theme="dark"] .field input {
+        color: var(--ink);
+      }
+
+      html[data-theme="dark"] .field input::placeholder {
+        color: #6e6a8a;
+      }
+
+      html[data-theme="dark"] .field > i {
+        color: #8d78e5;
+      }
+
+      html[data-theme="dark"] .switch {
+        background: #3d3760;
+      }
+
+      html[data-theme="dark"] .text-button {
+        color: #9a88ff;
+      }
+
+      html[data-theme="dark"] .submit-button {
+        box-shadow: 0 12px 26px rgba(80, 60, 180, 0.2);
+      }
+
+      html[data-theme="dark"] .social-divider {
+        color: #7d79a0;
+      }
+
+      html[data-theme="dark"] .social-divider::before,
+      html[data-theme="dark"] .social-divider::after {
+        background: rgba(100, 80, 180, 0.15);
+      }
+
+      html[data-theme="dark"] .social-button {
+        border-color: rgba(100, 80, 180, 0.12);
+        color: #9a88ff;
+        background: rgba(35, 33, 48, 0.9);
+        box-shadow: 0 7px 18px rgba(0, 0, 0, 0.15);
+      }
+
+      html[data-theme="dark"] .card-footer {
+        border-top-color: rgba(80, 70, 140, 0.12);
+      }
+
+      html[data-theme="dark"] .card-footer button {
+        color: #9a88ff;
+      }
+
+      html[data-theme="dark"] .toast {
+        border-color: rgba(100, 80, 180, 0.2);
+        background: rgba(27, 28, 38, 0.92);
+        box-shadow: 0 12px 30px rgba(0, 0, 0, 0.3);
+        color: var(--ink);
+      }
     </style>
   </head>
   <body>
@@ -1061,6 +1203,18 @@
         showMessage("检测到有效登录信息，可直接进入系统", "success");
         submitText.textContent = "重新登录";
       }
+
+      // 主题同步
+      (function syncTheme() {
+        const key = "silver-wolf-theme";
+        const saved = localStorage.getItem(key);
+        const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const theme = saved === "dark" || saved === "light" ? saved : (prefersDark ? "dark" : "light");
+        document.documentElement.dataset.theme = theme;
+        window.addEventListener("storage", (e) => {
+          if (e.key === key) document.documentElement.dataset.theme = e.newValue || "light";
+        });
+      })();
     </script>
   </body>
 </html>
