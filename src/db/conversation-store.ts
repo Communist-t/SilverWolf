@@ -120,6 +120,72 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_long_term_memories_owner_status
     ON long_term_memories(owner_id, status, updated_at DESC);
+
+  -- 健身追踪表
+  CREATE TABLE IF NOT EXISTS fitness_profile (
+    owner_id TEXT PRIMARY KEY,
+    bmr INTEGER DEFAULT 0,
+    calorie_target INTEGER DEFAULT 0,
+    protein_target_g REAL DEFAULT 0,
+    carbs_target_g REAL DEFAULT 0,
+    fat_target_g REAL DEFAULT 0,
+    weight_kg REAL,
+    height_cm REAL,
+    age INTEGER,
+    gender TEXT,
+    activity_level TEXT DEFAULT 'sedentary',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS fitness_daily (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id TEXT NOT NULL,
+    date TEXT NOT NULL,
+    calories INTEGER DEFAULT 0,
+    protein_g REAL DEFAULT 0,
+    carbs_g REAL DEFAULT 0,
+    fat_g REAL DEFAULT 0,
+    water_ml INTEGER DEFAULT 0,
+    sleep_hours REAL DEFAULT 0,
+    notes TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(owner_id, date)
+  );
+
+  CREATE TABLE IF NOT EXISTS fitness_workouts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id TEXT NOT NULL,
+    date TEXT NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('cardio', 'strength', 'mixed')),
+    duration_minutes INTEGER NOT NULL,
+    details TEXT DEFAULT '',
+    intensity TEXT DEFAULT 'moderate' CHECK (intensity IN ('low', 'moderate', 'high')),
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS fitness_meals (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    owner_id TEXT NOT NULL,
+    date TEXT NOT NULL,
+    meal_type TEXT NOT NULL CHECK (meal_type IN ('breakfast', 'lunch', 'dinner', 'snack')),
+    food_name TEXT NOT NULL,
+    calories INTEGER NOT NULL,
+    protein_g REAL DEFAULT 0,
+    carbs_g REAL DEFAULT 0,
+    fat_g REAL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_fitness_daily_owner_date
+    ON fitness_daily(owner_id, date DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_fitness_workouts_owner_date
+    ON fitness_workouts(owner_id, date DESC);
+
+  CREATE INDEX IF NOT EXISTS idx_fitness_meals_owner_date
+    ON fitness_meals(owner_id, date DESC);
 `);
 
 const sessionColumns = db.prepare("PRAGMA table_info(sessions)").all() as Array<{

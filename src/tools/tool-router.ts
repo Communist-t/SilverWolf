@@ -11,8 +11,8 @@ import {
 } from "../current-date.js";
 
 export type SearchIntent =
-  | "news"
   | "weather"
+  | "news"
   | "official"
   | "technical"
   | "paper"
@@ -25,6 +25,9 @@ export interface ToolDecision {
   queries: string[];
   intent: SearchIntent;
   reason: string;
+  /** 安全拦截标记 — 命中违规话题时 true，调用方应跳过所有搜索直接拒绝 */
+  safetyBlocked?: boolean;
+  safetyReason?: string;
 }
 
 export interface ToolConversationContext {
@@ -101,6 +104,32 @@ const FILLER_PATTERNS = [
   /(是干什么的|是做什么的|干什么的|做什么的|是什么|介绍一下|给我看看)$/g,
 ];
 
+// ── 安全拦截规则（最高优先级，命中后完全跳过搜索） ──────────────
+
+/** 触及这些话题直接拒绝搜索，不发起任何网络检索 */
+const SAFETY_BLOCKED_PATTERNS: RegExp[] = [
+  /如何制作.*(?:炸弹|火药|毒品|冰毒|海洛因|氰化物|毒药|违禁药物)/i,
+  /(?:黑客|入侵|破解).*(?:银行|服务器|政府|公安|国防)/i,
+  /(?:银行卡|信用卡|密码|验证码).*(?:盗|骗|复制|破解)/i,
+  /(?:儿童|未成年人).*(?:色情|性|裸)/i,
+  /(?:暴力|恐怖|袭击).*(?:教学|教程|方法|指南)/i,
+  /(?:军用|军事).*(?:机密|保密|绝密|涉密)/i,
+  /(?:个人隐私|人肉|开盒|社工).*(?:查询|搜索|查找|获取)/i,
+  /(?:枪支|弹药|军火).*(?:购买|制造|交易)/i,
+];
+
+function safetyCheck(input: string): { blocked: boolean; reason?: string } {
+  for (const pattern of SAFETY_BLOCKED_PATTERNS) {
+    if (pattern.test(input)) {
+      return {
+        blocked: true,
+        reason: `安全拦截：消息命中安全规则（${pattern.source.slice(0, 30)}）`,
+      };
+    }
+  }
+  return { blocked: false };
+}
+
 function stripSearchPrefix(input: string): string {
   let normalized = input.trim().replace(/插叙/g, "查询");
   for (const prefix of DIRECT_SEARCH_PREFIXES) {
@@ -141,7 +170,7 @@ export function extractWeatherCity(input: string): string {
   const cleaned = input
     .replace(/\boi\b/gi, " ")
     .replace(
-      /你帮我|帮我|麻烦你|请问|查一下|查下|查查|查询|搜一下|看看|看下|告诉我|我想知道|想知道|你好|自我介绍一下|介绍一下|然后|顺便|另外|再/g,
+      /你帮我|帮我|麻烦你|请问|查一下|查下|查查|查询|搜一下|看看|看下|告诉我|我想知道|想知道|你好|自我介绍一下|介绍一下|然后|顺便|另外|再|一下|下/g,
       " "
     )
     .replace(/今天|今日|现在|当前|实时|明天|后天/g, " ")
@@ -151,7 +180,10 @@ export function extractWeatherCity(input: string): string {
     .replace(/[，,。.!！?？、\s]+/g, " ")
     .trim();
 
-  const candidates = cleaned.match(/[\u4e00-\u9fa5]{2,12}/g) ?? [];
+  // 常见非城市短词黑名单
+  const NON_CITY_WORDS = new Set(["一下", "下", "一下下", "这个", "那个", "哪个", "什么"]);
+  const candidates = (cleaned.match(/[\u4e00-\u9fa5]{2,12}/g) ?? [])
+    .filter((w) => !NON_CITY_WORDS.has(w));
   const city = candidates.at(-1) ?? "";
   if (city) return city.replace(/市$/, "");
   return cleaned.match(/[a-z][a-z .'-]{1,40}/i)?.[0]?.trim() ?? "";
@@ -166,18 +198,17 @@ function weatherDayLabel(input: string): "今日" | "明日" | "后日" {
 function detectIntent(input: string, query: string): SearchIntent {
   const text = `${input.replace(/插叙/g, "查询")} ${query}`.toLowerCase();
 
-  if (/天气|气温|温度|多少度|几度|降雨|下雨|暴雨|雷阵雨|湿度|空气质量|weather/.test(text)) {
+  if (
+    /天气|气温|温度|多少度|几度|降雨|下雨|暴雨|雷阵雨|湿度|空气质量|weather/.test(text)
+  ) {
     return "weather";
   }
 
-  if (
-    /新闻|热点|头条|快讯|时政|财经资讯|news|headline/.test(text) ||
-    /(?:今天|今日|最新|实时|today|latest).*(?:新闻|热点|头条|快讯|时政|资讯)/.test(text)
-  ) {
+  if (/新闻|热点|头条|快讯|资讯|热搜|国内|国际|财经|时政|news|headline/.test(text)) {
     return "news";
   }
 
-  if (/官网|官方|文档|docs|download|下载/.test(text)) {
+  if (/官网|官方|文档|docs|official/.test(text)) {
     return "official";
   }
 
@@ -189,7 +220,7 @@ function detectIntent(input: string, query: string): SearchIntent {
     return "paper";
   }
 
-  if (/代码|开源|github|api|sdk|框架|技术|报错|文档/.test(text)) {
+  if (/代码|开源|github|api|sdk|框架|技术|报错/.test(text)) {
     return "technical";
   }
 
@@ -214,10 +245,6 @@ function dedupe(values: string[]): string[] {
 
 function isHardwareContext(context?: ToolConversationContext): boolean {
   return context?.topic === "hardware";
-}
-
-function isNewsContext(context?: ToolConversationContext): boolean {
-  return context?.topic === "news";
 }
 
 function buildHardwareQueries(
@@ -275,11 +302,61 @@ function buildHardwareQueries(
   return dedupe(queries).slice(0, 6);
 }
 
+/** 判断一个 query 是否偏技术性，需要同时生成英文搜索词 */
+function needsEnglishQuery(input: string, intent: SearchIntent): boolean {
+  if (intent === "paper" || intent === "technical") return true;
+  if (intent === "product" && /[a-zA-Z]/.test(input)) return true;
+  return false;
+}
+
+/** 从输入中提取英文关键词供搜索用 */
+function extractEnglishTerms(input: string): string[] {
+  const terms = input.match(/[a-zA-Z][a-zA-Z0-9 .\-+#]+/g) ?? [];
+  return terms
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2 && !/^(the|is|are|for|and|with|that|this|how|what|why|when|where)$/i.test(t))
+    .slice(0, 3);
+}
+
+/** 为 technical / product 意图生成补充英文 query */
+function buildEnglishQueries(input: string, coreQuery: string): string[] {
+  const terms = extractEnglishTerms(input);
+  if (terms.length === 0) return [];
+  const engQuery = terms.join(" ");
+  if (engQuery === coreQuery) return [];
+  return [engQuery, `${engQuery} documentation`, `${engQuery} tutorial`];
+}
+
+/** 为指定意图添加 site: 限定后缀 */
+function addSiteDirectives(queries: string[], intent: SearchIntent): string[] {
+  const result = [...queries];
+  if (intent === "official") {
+    if (result.some((q) => /政策|法规|社保|医保|政府|国务院|税务局|人社局/.test(q))) {
+      result.push(`${result[0]} site:gov.cn`);
+    }
+    result.push(`${result[0]} site:baike.baidu.com`);
+  }
+  if (intent === "paper") {
+    result.push(`${result[0]} site:arxiv.org`);
+    result.push(`${result[0]} site:scholar.google.com`);
+  }
+  if (intent === "technical") {
+    result.push(`${result[0]} site:github.com`);
+    result.push(`${result[0]} site:stackoverflow.com`);
+    result.push(`${result[0]} site:docs.oracle.com`);
+  }
+  return result;
+}
+
 function buildQueries(input: string, query: string, intent: SearchIntent): string[] {
   const currentDate = currentDateForSearch();
-  const queries = intent === "news" || intent === "weather" ? [] : [query];
+  const queries: string[] = [];
   const normalizedInput = input.replace(/插叙/g, "查询");
 
+  // ── 基础 query ──
+  if (intent !== "weather") queries.push(query);
+
+  // ── 天气 ──
   if (intent === "weather") {
     const city = extractWeatherCity(normalizedInput) || extractWeatherCity(query);
     if (!city) return [];
@@ -288,7 +365,6 @@ function buildQueries(input: string, query: string, intent: SearchIntent): strin
     const airQualitySuffix = /空气质量|aqi|pm\s*2[._]?5|pm10/i.test(normalizedInput)
       ? " 空气质量"
       : "";
-
     queries.push(
       `${location} ${dayLabel}天气${airQualitySuffix}`,
       `${location} ${currentDate} ${dayLabel}天气${airQualitySuffix}`,
@@ -296,74 +372,95 @@ function buildQueries(input: string, query: string, intent: SearchIntent): strin
     );
   }
 
-  if (intent === "news") {
-    let coreQuery = cleanSearchQuery(query);
-    if (/ai|人工智能/i.test(normalizedInput) && !/ai|人工智能/i.test(coreQuery)) {
-      coreQuery = `${coreQuery} AI 人工智能`.trim();
+  // ── 产品查询 — 多角度：参数/评测/价格/对比 ──
+  if (intent === "product") {
+    queries.push(`${query} 参数 配置`);
+    queries.push(`${query} 评测`);
+    queries.push(`${query} 价格`);
+    queries.push(`${query} 对比`);
+    queries.push(`${query} 官网`);
+    queries.push(`${query} 文档`);
+    queries.push(`${query} GitHub`);
+  }
+
+  // ── 官方查询 ──
+  if (intent === "official") {
+    queries.push(`${query} 官网`);
+    queries.push(`${query} official docs`);
+    if (/端午|节日|节假日|放假|假期/.test(input)) {
+      const currentYear = currentYearInChina();
+      queries.unshift(`${currentYear} 端午节 日期 官方`);
+      queries.unshift(`${currentYear}年端午节放假安排 国务院`);
     }
-    const newsQuery = coreQuery || "今日";
+  }
+
+  // ── 新闻 — 优先覆盖权威新闻源，兼顾自然语言 query ──
+  if (intent === "news") {
+    const chineseDate = currentChineseDateInChina();
+    let newsQuery = cleanSearchQuery(query);
+    if (/ai|人工智能/i.test(normalizedInput) && !/ai|人工智能/i.test(newsQuery)) {
+      newsQuery = `${newsQuery} AI 人工智能`.trim();
+    }
+    const core = newsQuery || "今日";
     if (/政治|时政/i.test(normalizedInput)) {
       queries.push(
         `${currentDate} 中国 时政 新闻`,
         `${currentDate} 国际 政治 新闻`,
-        `${currentChineseDateForSearch()} 时政 新闻`,
-        `${newsQuery || "时政"} 今日 新闻`,
-        `${newsQuery || "政治"} 最新 资讯`
+        `${chineseDate} 时政 新闻`,
+        `${core} 今日 新闻`,
+        `${core} 最新 资讯`
       );
     } else if (/ai|人工智能/i.test(normalizedInput)) {
       queries.push(
         `${currentDate} ${newsQuery} 新闻`,
-        `${currentChineseDateForSearch()} ${newsQuery} 新闻`,
+        `${chineseDate} ${newsQuery} 新闻`,
         `${currentDate} AI 国内外新闻`,
-        `${currentChineseDateForSearch()} AI 热点小时报`,
+        `${chineseDate} AI 热点`,
         `${newsQuery} 今日 热点`,
         `${newsQuery} 最新 资讯`
       );
     } else {
       queries.push(
-        `${currentDate} 新闻联播 今日 头条`,
-        `${currentChineseDateForSearch()} 今日 新闻 头条`,
+        `${currentDate} 新闻`,
+        `${chineseDate} 今日 新闻 头条`,
         `${currentDate} 国内 国际 新闻`,
-        `${currentDate} site:news.cctv.com 新闻`,
-        `${currentDate} site:news.cn 新闻`
+        `${core} 最新 新闻`,
+        `${core} 今日 热点`
       );
     }
   }
 
-  if (intent === "official") {
-    queries.push(`${query} 官网`, `${query} official docs`);
-  }
-
-  if (/端午|节日|节假日|放假|假期/.test(input)) {
-    const currentYear = currentYearInChina();
-    queries.unshift(`${currentYear} 端午节 日期 官方`);
-    queries.unshift(`${currentYear}年端午节放假安排 国务院`);
-  }
-
+  // ── 技术查询 — 多角度：文档/教程/对比/基准 ──
   if (intent === "technical") {
-    queries.push(`${query} GitHub`, `${query} docs`, `${query} 技术文档`);
+    queries.push(`${query} GitHub`);
+    queries.push(`${query} docs`);
+    queries.push(`${query} 技术文档`);
+    queries.push(`${query} 教程`);
+    queries.push(`${query} 对比`);
+    queries.push(`${query} benchmark`);
   }
 
+  // ── 论文 ──
   if (intent === "paper") {
-    queries.push(`${query} paper`, `${query} arxiv`, `${query} 论文`);
+    queries.push(`${query} paper`);
+    queries.push(`${query} arxiv`);
+    queries.push(`${query} 论文`);
+    queries.push(`${query} review`);
   }
 
-  if (intent === "product") {
-    queries.push(`${query} 官网`, `${query} 文档`, `${query} GitHub`);
-  }
-
+  // ── 旅游 ──
   if (isTravelRequest(input)) {
     const destination = extractTravelDestination(input) || query;
     queries.unshift(`${destination} 文旅局 官方 景点`);
-    queries.unshift(`${destination} 旅游 景点 开放时间 门票 交通`);
-    queries.unshift(`${destination} 有什么好玩的 景点 推荐`);
+    queries.unshift(`${destination} 旅游 攻略 门票 交通`);
+    queries.unshift(`${destination} 景点 推荐 一日游`);
   }
 
+  // ── 白龙马 / 银狼 特殊 ──
   if (input.includes("白龙马") && input.toLowerCase().includes("agent")) {
     queries.unshift("白龙马 BaiLongma Agent 官网 文档");
     queries.unshift("BaiLongma Agent");
   }
-
   if (input.includes("银狼")) {
     queries.unshift("银狼 LV.999 同人作品");
     queries.unshift("银狼 同人");
@@ -372,7 +469,16 @@ function buildQueries(input: string, query: string, intent: SearchIntent): strin
     queries.unshift("崩铁 银狼 二创");
   }
 
-  return dedupe(queries).slice(0, 6);
+  // ── 英文补充 query（技术/产品/论文类） ──
+  if (needsEnglishQuery(input, intent)) {
+    const engQueries = buildEnglishQueries(input, query);
+    queries.push(...engQueries);
+  }
+
+  // ── site: 限定补充 ──
+  const withSite = addSiteDirectives(queries, intent);
+
+  return dedupe(withSite).slice(0, 8);
 }
 
 function isTravelRequest(input: string): boolean {
@@ -408,29 +514,26 @@ export function extractTravelDestination(input: string): string {
   return "";
 }
 
-function buildNewsFollowUpQueries(
-  input: string,
-  query: string,
-  context?: ToolConversationContext
-): string[] {
-  const currentDate = currentDateForSearch();
-  return dedupe([
-    ...(context?.searchHints ?? []),
-    ...(context?.keywords ?? []).map(
-      (keyword) => `${currentDate} ${keyword} 新闻 详细`
-    ),
-    `${currentDate} 今日 新闻 详情`,
-    `${currentChineseDateForSearch()} 今日 新闻 详情`,
-    query,
-    input,
-  ]).slice(0, 6);
-}
-
 export function decideTools(
   userInput: string,
   context?: ToolConversationContext
 ): ToolDecision {
   const input = userInput.trim().replace(/插叙/g, "查询");
+
+  // ⛔ 安全拦截 — 最高优先级，完全跳过搜索流程
+  const safety = safetyCheck(input);
+  if (safety.blocked) {
+    return {
+      useWebSearch: false,
+      query: "",
+      queries: [],
+      intent: "general",
+      reason: "safety-blocked",
+      safetyBlocked: true,
+      safetyReason: safety.reason,
+    };
+  }
+
   const query = stripSearchPrefix(input) || input;
 
   if (!input) {
@@ -459,15 +562,12 @@ export function decideTools(
     };
   }
   const travelRequest = isTravelRequest(input);
+  const newsContextFollowUp =
+    context?.topic === "news" &&
+    /第?\s*(?:\d+|[一二三四五六])\s*(?:条|个|项)|更详细|详细|展开|讲讲|细说|具体|继续|然后呢|还有呢|多说点|详细信息/.test(input);
 
-  const explicitNonHardwareNews =
-    /政治|时政|新闻|热点/i.test(input) &&
-    !/电脑|diy|装机|配置|显卡|cpu|处理器|主板|内存|固态|ssd|rtx|5070|50\s*系/i.test(input);
   const useHardwareContext =
-    isHardwareContext(context) && !explicitNonHardwareNews && !weatherRequest;
-  const newsFollowUp =
-    isNewsContext(context) &&
-    /更详细|详细|展开|讲讲|细说|具体|继续|还有呢|多说点|详细信息/i.test(input);
+    isHardwareContext(context) && !weatherRequest && !newsContextFollowUp;
 
   const hardwareProductFollowUp =
     useHardwareContext &&
@@ -479,20 +579,20 @@ export function decideTools(
     weatherRequest ||
     travelRequest ||
     hardwareProductFollowUp ||
-    newsFollowUp
+    newsContextFollowUp
   ) {
     const intent = useHardwareContext
       ? "product"
-      : newsFollowUp
+      : newsContextFollowUp
         ? "news"
-        : detectIntent(input, query);
-    const queries = useHardwareContext
+      : detectIntent(input, query);
+    const queries = newsContextFollowUp && context?.searchHints?.length
+      ? context.searchHints
+      : useHardwareContext
       ? buildHardwareQueries(input, query, context)
-      : newsFollowUp
-        ? buildNewsFollowUpQueries(input, query, context)
       : buildQueries(input, query, intent);
     return {
-      useWebSearch: true,
+      useWebSearch: !newsContextFollowUp || !/第?\s*(?:\d+|[一二三四五六])\s*(?:条|个|项)/.test(input),
       query: queries[0] ?? query,
       queries,
       intent,
@@ -502,8 +602,8 @@ export function decideTools(
           ? "weather-signal"
         : travelRequest
           ? "travel-signal"
-        : newsFollowUp
-          ? "news-follow-up"
+        : newsContextFollowUp
+          ? "news-context-follow-up"
         : "hardware-follow-up",
     };
   }

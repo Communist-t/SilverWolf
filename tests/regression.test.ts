@@ -311,6 +311,14 @@ test("页面布局结构保持稳定", () => {
   assert.doesNotMatch(html, /\/assets\/silver-wolf-preview\.png/);
   assert.match(html, /grid-template-columns: 208px minmax\(460px, 1fr\) minmax\(320px, 350px\)/);
   assert.match(html, /id="conversationNav"/);
+  assert.match(html, /id="memoryLibraryNav"/);
+  assert.match(html, /id="skillLibraryNav"/);
+  assert.match(html, /id="analyticsNav"/);
+  assert.match(html, /id="workspacePanelDialog"/);
+  assert.match(html, /openWorkspacePanel\("memory"\)/);
+  assert.match(html, /openWorkspacePanel\("skills"\)/);
+  assert.match(html, /openWorkspacePanel\("analytics"\)/);
+  assert.doesNotMatch(html, /aria-label="记忆库，即将开放" disabled/);
   assert.match(html, /class="sidebar-rotator"/);
   assert.match(html, /transform: rotateY\(-180deg\)/);
   assert.match(html, /backface-visibility: hidden/);
@@ -320,6 +328,22 @@ test("页面布局结构保持稳定", () => {
   assert.match(html, /id="modelSettingsNav"/);
   assert.match(html, /id="modelSettingsDialog"/);
   assert.match(html, /id="modelConfigForm"/);
+  assert.match(html, /id="modelPresetSelect"/);
+  assert.match(html, /id="toggleApiKeyVisibility"/);
+  assert.match(html, /id="testModelConfig"/);
+  assert.match(html, /id="modelEditState"/);
+  assert.match(html, /is-dirty/);
+  assert.match(html, /保存更改 \*/);
+  assert.match(html, /\/settings\/models\/test/);
+  assert.match(html, />访问格式<\/span>/);
+  assert.match(html, />密钥<\/span>/);
+  assert.match(html, /已保存密钥，留空则不更新/);
+  assert.match(html, /MODEL_PRESET_GROUPS/);
+  assert.match(html, /deepseek-v4-flash/);
+  assert.match(html, /deepseek-v4-pro/);
+  assert.match(html, /agnes-2\.0-flash/);
+  assert.doesNotMatch(html, /"deepseek-chat"/);
+  assert.doesNotMatch(html, /"deepseek-reasoner"/);
   assert.match(html, /id="useCompatibleTemplate"/);
   assert.match(html, /apiFetch\("\/settings\/models"/);
   assert.match(html, /activateModelConfig\(model\.id\)/);
@@ -516,7 +540,7 @@ test("启动配置校验会拒绝缺失、占位和非法值", () => {
   assert.ok(errors.some((error) => error.includes("WEB_SEARCH_TIMEOUT_MS")));
   assert.ok(errors.some((error) => error.includes("WEB_SEARCH_RETRIES")));
   assert.ok(errors.some((error) => error.includes("WEB_SEARCH_CACHE_TTL_MS")));
-  assert.ok(collectConfigErrors({}).some((error) => error.includes("LLM_API_KEY")));
+  assert.deepEqual(collectConfigErrors({}), []);
   assert.ok(
     collectConfigErrors({
       LLM_API_KEY: "sk-test-real-value",
@@ -809,7 +833,16 @@ test("HTTP 健康检查与会话 CRUD", async () => {
   assert.equal(modelSettingsBody.models.some((model) => model.builtIn), true);
   assert.equal(modelSettingsBody.models.some((model) => "apiKey" in model), false);
   assert.equal(modelSettingsBody.templates.compatible.model, "custom-model");
-  assert.equal(modelSettingsBody.templates.deepseek.model, "deepseek-chat");
+  assert.equal(modelSettingsBody.templates.deepseek.model, "deepseek-v4-flash");
+
+  const skillSettings = await app.request("/settings/skills");
+  assert.equal(skillSettings.status, 200);
+  const skillSettingsBody = await skillSettings.json() as {
+    skills: Array<{ name: string; status: string; builtIn: boolean; version: string }>;
+  };
+  assert.ok(skillSettingsBody.skills.some((skill) => skill.name === "web-search"));
+  assert.ok(skillSettingsBody.skills.every((skill) => skill.status === "online"));
+  assert.ok(skillSettingsBody.skills.every((skill) => skill.builtIn));
 
   const createdModel = await app.request("/settings/models", {
     method: "POST",
@@ -829,6 +862,59 @@ test("HTTP 健康检查与会话 CRUD", async () => {
   assert.equal(createdModelBody.model.model, "deepseek-reasoner");
   assert.equal(createdModelBody.model.hasApiKey, true);
   assert.equal("apiKey" in createdModelBody.model, false);
+
+  const testedModel = await app.request("/settings/models/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      label: "测试模型",
+      provider: "DeepSeek",
+      baseURL: `http://127.0.0.1:${mockPort}/v1`,
+      model: "deepseek-v4-flash",
+      apiKey: "test-api-key",
+    }),
+  });
+  assert.equal(testedModel.status, 200);
+  const testedModelBody = await testedModel.json() as {
+    ok: boolean;
+    model: string;
+    apiKey?: string;
+  };
+  assert.equal(testedModelBody.ok, true);
+  assert.equal(testedModelBody.model, "deepseek-v4-flash");
+  assert.equal("apiKey" in testedModelBody, false);
+  assert.equal(lastMockModel, "deepseek-v4-flash");
+
+  const testedSavedKey = await app.request("/settings/models/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      modelId: createdModelBody.model.id,
+      label: "测试已保存密钥",
+      provider: "DeepSeek",
+      baseURL: `http://127.0.0.1:${mockPort}/v1`,
+      model: "deepseek-v4-pro",
+    }),
+  });
+  assert.equal(testedSavedKey.status, 200);
+  assert.equal(lastMockModel, "deepseek-v4-pro");
+
+  const normalizedProviderModel = await app.request("/settings/models", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      label: "DeepSeek Compatible",
+      provider: "OpenAI 兼容",
+      baseURL: "https://api.deepseek.com",
+      model: "deepseek-v4-flash",
+      apiKey: "deepseek-compatible-key",
+    }),
+  });
+  assert.equal(normalizedProviderModel.status, 201);
+  const normalizedProviderBody = await normalizedProviderModel.json() as {
+    model: { provider: string };
+  };
+  assert.equal(normalizedProviderBody.model.provider, "DeepSeek");
 
   const activatedModel = await app.request(
     `/settings/models/${createdModelBody.model.id}/activate`,

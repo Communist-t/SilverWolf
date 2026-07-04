@@ -2496,7 +2496,8 @@
         display: none;
       }
 
-      #modelSettingsDialog {
+      #modelSettingsDialog,
+      #workspacePanelDialog {
         position: fixed;
         z-index: 49;
         inset: 0;
@@ -2511,7 +2512,8 @@
         backdrop-filter: blur(5px);
       }
 
-      #modelSettingsDialog[hidden] {
+      #modelSettingsDialog[hidden],
+      #workspacePanelDialog[hidden] {
         display: none;
       }
 
@@ -2544,6 +2546,174 @@
         color: var(--text);
         background: var(--surface-solid);
         box-shadow: 0 24px 70px rgba(25, 22, 47, 0.24);
+      }
+
+      .workspace-panel-content {
+        display: grid;
+        grid-template-rows: auto auto minmax(0, 1fr);
+        gap: 14px;
+        width: min(780px, calc(100vw - 28px));
+        min-height: min(560px, calc(100dvh - 20px));
+        max-height: calc(100dvh - 20px);
+        overflow: hidden;
+        padding: 18px;
+        border: 1px solid var(--line);
+        border-radius: 14px;
+        color: var(--text);
+        background: var(--surface-solid);
+        box-shadow: 0 24px 70px rgba(25, 22, 47, 0.24);
+      }
+
+      .workspace-panel-actions {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        min-height: 34px;
+      }
+
+      .workspace-panel-actions:empty {
+        display: none;
+      }
+
+      .workspace-panel-actions button {
+        min-height: 34px;
+        font-weight: 750;
+      }
+
+      .workspace-secondary-btn {
+        background: var(--surface-solid);
+        color: var(--text);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        padding: 0 14px;
+        cursor: pointer;
+        transition: background 0.15s, border-color 0.15s;
+      }
+      .workspace-secondary-btn:hover {
+        background: var(--panel-2);
+        border-color: var(--muted);
+      }
+
+      .workspace-panel-body {
+        min-height: 0;
+        overflow: auto;
+        display: grid;
+        gap: 12px;
+        align-content: start;
+      }
+
+      .workspace-summary-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .workspace-summary-card,
+      .workspace-list-item,
+      .workspace-empty-state {
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        background: var(--surface-soft);
+      }
+
+      .workspace-summary-card {
+        display: grid;
+        gap: 6px;
+        min-height: 74px;
+        padding: 12px;
+      }
+
+      .workspace-summary-card span,
+      .workspace-list-meta,
+      .workspace-empty-state,
+      .workspace-chip {
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .workspace-summary-card strong {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        font-size: 21px;
+      }
+
+      .workspace-list {
+        display: grid;
+        gap: 10px;
+      }
+
+      .workspace-list-item {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 12px;
+        align-items: center;
+        min-height: 70px;
+        padding: 12px;
+      }
+
+      .workspace-list-copy {
+        min-width: 0;
+      }
+
+      .workspace-list-copy strong,
+      .workspace-list-copy p {
+        display: block;
+        min-width: 0;
+        overflow-wrap: anywhere;
+      }
+
+      .workspace-list-copy strong {
+        font-size: 14px;
+      }
+
+      .workspace-list-copy p {
+        margin: 5px 0 0;
+        color: var(--muted);
+        font-size: 13px;
+        line-height: 1.5;
+      }
+
+      .workspace-list-meta {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+        margin-top: 8px;
+      }
+
+      .workspace-chip {
+        display: inline-flex;
+        align-items: center;
+        min-height: 22px;
+        padding: 0 8px;
+        border-radius: 999px;
+        background: var(--surface-solid);
+      }
+
+      .workspace-danger-btn {
+        color: var(--danger);
+        border-color: color-mix(in srgb, var(--danger) 28%, var(--line));
+        background: color-mix(in srgb, var(--danger) 8%, var(--surface-solid));
+      }
+
+      .workspace-empty-state {
+        display: grid;
+        place-items: center;
+        min-height: 180px;
+        padding: 24px;
+        text-align: center;
+        line-height: 1.6;
+      }
+
+      @media (max-width: 720px) {
+        .workspace-summary-grid,
+        .workspace-list-item {
+          grid-template-columns: 1fr;
+        }
+
+        .workspace-panel-content {
+          min-height: min(620px, calc(100dvh - 20px));
+        }
       }
 
       .settings-title-wrap {
@@ -2680,9 +2850,35 @@
       }
 
       .model-panel-head h3 {
-        min-width: max-content;
+        min-width: 0;
         margin: 0;
         font-size: 15px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .model-edit-state {
+        display: inline-flex;
+        align-items: center;
+        min-height: 22px;
+        padding: 0 9px;
+        border-radius: 999px;
+        color: var(--muted);
+        background: var(--surface-solid);
+        font-size: 11px;
+        font-weight: 800;
+        white-space: nowrap;
+      }
+
+      .model-edit-state[data-status="dirty"] {
+        color: #7b4b00;
+        background: #fff4d8;
+      }
+
+      html[data-theme="dark"] .model-edit-state[data-status="dirty"] {
+        color: #f0c46a;
+        background: rgba(240, 196, 106, 0.14);
       }
 
       .model-panel-head button {
@@ -2770,7 +2966,7 @@
       }
 
       .model-config-title strong {
-        font-size: 13px;
+        font-size: 14px;
       }
 
       .model-config-title span,
@@ -2829,7 +3025,7 @@
       .model-config-form .model-panel-head,
       .model-config-form label:first-of-type,
       .model-config-form label:nth-of-type(3),
-      .model-config-form label:nth-of-type(5),
+      .model-config-form label:nth-of-type(6),
       .model-connection-status,
       .model-form-actions,
       #modelSettingsFeedback {
@@ -2864,6 +3060,58 @@
         outline: 3px solid color-mix(in srgb, var(--violet) 14%, transparent);
       }
 
+      .model-config-form label.is-dirty span::after {
+        content: "已改";
+        justify-self: start;
+        margin-left: 6px;
+        padding: 1px 6px;
+        border-radius: 999px;
+        color: #7b4b00;
+        background: #fff4d8;
+        font-size: 10px;
+        font-weight: 850;
+      }
+
+      .model-config-form label.is-dirty input,
+      .model-config-form label.is-dirty select {
+        border-color: #e0a72d;
+        background: color-mix(in srgb, #fff4d8 34%, var(--surface-solid));
+      }
+
+      .model-config-form select {
+        width: 100%;
+        min-height: 36px;
+        padding: 0 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        color: var(--text);
+        background: var(--surface-solid);
+        font: inherit;
+      }
+
+      .model-config-form select:focus {
+        border-color: var(--violet);
+        outline: 3px solid color-mix(in srgb, var(--violet) 14%, transparent);
+      }
+
+      .api-key-field {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+      }
+
+      .api-key-field input {
+        min-width: 0;
+      }
+
+      .api-key-field button {
+        width: 42px;
+        min-height: 36px;
+        padding: 0;
+        color: var(--muted);
+        background: var(--surface-solid);
+      }
+
       .model-connection-status {
         display: flex;
         align-items: center;
@@ -2876,6 +3124,33 @@
         color: #119768;
         background: #effbf6;
         font-size: 12px;
+      }
+
+      .model-connection-status span {
+        min-width: 0;
+        overflow: hidden;
+        text-align: right;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .model-connection-status span[data-status="error"] {
+        color: var(--danger);
+      }
+
+      .model-connection-status span[data-status="success"] {
+        color: #119768;
+      }
+
+      .model-test-btn {
+        flex: 0 0 auto;
+        min-height: 28px;
+        padding: 0 10px;
+        color: var(--violet-strong);
+        border-color: color-mix(in srgb, var(--violet) 32%, var(--line));
+        background: var(--surface-solid);
+        font-size: 12px;
+        font-weight: 800;
       }
 
       html[data-theme="dark"] .model-connection-status {
@@ -4535,9 +4810,9 @@
 
           <nav class="product-nav" aria-label="工作区导航">
             <button id="conversationNav" class="nav-item active" type="button" aria-label="打开最近对话" aria-controls="sessionList" aria-expanded="false"><span class="nav-symbol">◫</span><span class="nav-label">对话</span></button>
-            <button class="nav-item" type="button" aria-label="记忆库，即将开放" disabled><span class="nav-symbol">▣</span><span class="nav-label">记忆库<small>即将开放</small></span></button>
-            <button class="nav-item" type="button" aria-label="能力插件，即将开放" disabled><span class="nav-symbol">⌘</span><span class="nav-label">能力插件<small>即将开放</small></span></button>
-            <button class="nav-item" type="button" aria-label="数据分析，即将开放" disabled><span class="nav-symbol">◇</span><span class="nav-label">数据分析<small>即将开放</small></span></button>
+            <button id="memoryLibraryNav" class="nav-item" type="button" aria-label="打开记忆库"><span class="nav-symbol">▣</span><span class="nav-label">记忆库<small id="memoryNavLabel">读取中</small></span></button>
+            <button id="skillLibraryNav" class="nav-item" type="button" aria-label="打开能力插件"><span class="nav-symbol">⌘</span><span class="nav-label">能力插件<small id="skillNavLabel">读取中</small></span></button>
+            <button id="analyticsNav" class="nav-item" type="button" aria-label="打开数据分析"><span class="nav-symbol">◇</span><span class="nav-label">数据分析<small id="analyticsNavLabel">实时统计</small></span></button>
             <button id="modelSettingsNav" class="nav-item" type="button" aria-label="打开模型设置"><span class="nav-symbol">⚙</span><span class="nav-label">模型设置<small id="activeModelNavLabel">读取中</small></span></button>
           </nav>
 
@@ -4716,6 +4991,23 @@
       </form>
     </section>
 
+    <section id="workspacePanelDialog" role="dialog" aria-modal="true" aria-labelledby="workspacePanelTitle" hidden>
+      <div class="workspace-panel-content">
+        <header class="profile-dialog-header">
+          <div class="settings-title-wrap">
+            <span id="workspacePanelIcon" class="settings-title-icon" aria-hidden="true"><i class="ph ph-squares-four"></i></span>
+            <div>
+              <h2 id="workspacePanelTitle">工作区</h2>
+              <p id="workspacePanelSubtitle" class="settings-subtitle">读取中。</p>
+            </div>
+          </div>
+          <button id="workspacePanelClose" class="profile-dialog-close" type="button" aria-label="关闭工作区面板">×</button>
+        </header>
+        <div id="workspacePanelActions" class="workspace-panel-actions"></div>
+        <section id="workspacePanelBody" class="workspace-panel-body" aria-live="polite"></section>
+      </div>
+    </section>
+
     <section id="modelSettingsDialog" role="dialog" aria-modal="true" aria-labelledby="modelSettingsTitle" hidden>
       <div class="model-settings-content">
         <header class="profile-dialog-header">
@@ -4737,7 +5029,7 @@
           </div>
           <span class="model-status-pill">使用中</span>
           <div class="model-current-stat">
-            <span>类型</span>
+            <span>访问格式</span>
             <strong id="activeModelProvider">-</strong>
           </div>
           <div class="model-current-stat">
@@ -4751,14 +5043,15 @@
           <div class="model-list-panel" aria-label="模型列表">
             <div class="model-panel-head">
               <h3>模型列表</h3>
-              <button id="refreshModels" type="button"><i class="ph ph-plus" aria-hidden="true"></i> 新建模型</button>
+              <button id="newModelConfig" type="button"><i class="ph ph-plus" aria-hidden="true"></i> 新建模型</button>
             </div>
             <div id="modelConfigList" class="model-config-list"></div>
           </div>
 
           <form id="modelConfigForm" class="model-config-form">
             <div class="model-panel-head">
-              <h3>模型详情</h3>
+              <h3 id="modelDetailTitle">模型详情</h3>
+              <span id="modelEditState" class="model-edit-state">未选择</span>
               <button id="useCompatibleTemplate" class="model-template-pill" type="button">通用模板</button>
             </div>
             <label>
@@ -4767,23 +5060,31 @@
             </label>
             <label>
               <span>服务商</span>
-              <input id="modelConfigProvider" name="provider" maxlength="40" placeholder="OpenAI 兼容" />
+              <input id="modelConfigProvider" name="provider" maxlength="40" placeholder="DeepSeek / OpenAI / Agnes" />
             </label>
             <label>
               <span>Base URL</span>
               <input id="modelConfigBaseUrl" name="baseURL" type="url" placeholder="https://api.example.com/v1" required />
             </label>
             <label>
+              <span>支持模型</span>
+              <select id="modelPresetSelect" aria-label="选择当前服务商常用模型"></select>
+            </label>
+            <label>
               <span>模型 ID</span>
               <input id="modelConfigModel" name="model" maxlength="120" placeholder="custom-model" required />
             </label>
             <label>
-              <span>API Key</span>
-              <input id="modelConfigApiKey" name="apiKey" type="password" autocomplete="off" placeholder="sk-..." required />
+              <span>密钥</span>
+              <div class="api-key-field">
+                <input id="modelConfigApiKey" name="apiKey" type="password" autocomplete="off" placeholder="sk-..." required />
+                <button id="toggleApiKeyVisibility" type="button" title="显示密钥" aria-label="显示密钥"><i class="ph ph-eye" aria-hidden="true"></i></button>
+              </div>
             </label>
             <div class="model-connection-status">
               <strong><i class="ph ph-check-circle" aria-hidden="true"></i> 配置保存后可切换使用</strong>
-              <span>当前未进行在线测试</span>
+              <span id="modelTestStatus">当前未进行在线测试</span>
+              <button id="testModelConfig" class="model-test-btn" type="button">测试</button>
             </div>
             <p id="modelSettingsFeedback" class="profile-dialog-feedback" aria-live="polite"></p>
             <div class="model-form-actions">
@@ -4898,6 +5199,12 @@
       const appNavigation = document.querySelector(".app-navigation");
       const sessionSidebar = document.querySelector(".session-sidebar");
       const conversationNav = document.querySelector("#conversationNav");
+      const memoryLibraryNav = document.querySelector("#memoryLibraryNav");
+      const memoryNavLabel = document.querySelector("#memoryNavLabel");
+      const skillLibraryNav = document.querySelector("#skillLibraryNav");
+      const skillNavLabel = document.querySelector("#skillNavLabel");
+      const analyticsNav = document.querySelector("#analyticsNav");
+      const analyticsNavLabel = document.querySelector("#analyticsNavLabel");
       const modelSettingsNav = document.querySelector("#modelSettingsNav");
       const activeModelNavLabel = document.querySelector("#activeModelNavLabel");
       const toggleSidebar = document.querySelector("#toggleSidebar");
@@ -4952,23 +5259,36 @@
       const profileDialogFeedback = document.querySelector("#profileDialogFeedback");
       const profileSaveBtn = document.querySelector("#profileSaveBtn");
       const logoutBtn = document.querySelector("#logoutBtn");
+      const workspacePanelDialog = document.querySelector("#workspacePanelDialog");
+      const workspacePanelClose = document.querySelector("#workspacePanelClose");
+      const workspacePanelIcon = document.querySelector("#workspacePanelIcon");
+      const workspacePanelTitle = document.querySelector("#workspacePanelTitle");
+      const workspacePanelSubtitle = document.querySelector("#workspacePanelSubtitle");
+      const workspacePanelActions = document.querySelector("#workspacePanelActions");
+      const workspacePanelBody = document.querySelector("#workspacePanelBody");
       const modelSettingsDialog = document.querySelector("#modelSettingsDialog");
       const modelSettingsClose = document.querySelector("#modelSettingsClose");
       const modelConfigList = document.querySelector("#modelConfigList");
       const modelConfigForm = document.querySelector("#modelConfigForm");
+      const modelDetailTitle = document.querySelector("#modelDetailTitle");
+      const modelEditState = document.querySelector("#modelEditState");
       const modelConfigLabel = document.querySelector("#modelConfigLabel");
       const modelConfigProvider = document.querySelector("#modelConfigProvider");
       const modelConfigBaseUrl = document.querySelector("#modelConfigBaseUrl");
+      const modelPresetSelect = document.querySelector("#modelPresetSelect");
       const modelConfigModel = document.querySelector("#modelConfigModel");
       const modelConfigApiKey = document.querySelector("#modelConfigApiKey");
+      const toggleApiKeyVisibility = document.querySelector("#toggleApiKeyVisibility");
+      const modelTestStatus = document.querySelector("#modelTestStatus");
       const modelSettingsFeedback = document.querySelector("#modelSettingsFeedback");
       const activeModelName = document.querySelector("#activeModelName");
       const activeModelMeta = document.querySelector("#activeModelMeta");
       const activeModelProvider = document.querySelector("#activeModelProvider");
       const activeModelId = document.querySelector("#activeModelId");
-      const refreshModels = document.querySelector("#refreshModels");
+      const newModelConfig = document.querySelector("#newModelConfig");
       const useCompatibleTemplate = document.querySelector("#useCompatibleTemplate");
       const saveModelConfig = document.querySelector("#saveModelConfig");
+      const testModelConfig = document.querySelector("#testModelConfig");
       const deleteCurrentModel = document.querySelector("#deleteCurrentModel");
       const actionDialog = document.querySelector("#actionDialog");
       const actionForm = document.querySelector("#actionForm");
@@ -4995,6 +5315,7 @@
       let actionDialogUsesInput = false;
       let modelSettings = { models: [], activeModel: null, templates: {} };
       let selectedModelConfigId = null;
+      let selectedModelSnapshot = null;
       let sessions = [];
       let batchMode = false;
       const selectedSessionIds = new Set();
@@ -5006,6 +5327,31 @@
       let activeConversationTurn = 0;
       let conversationMapRefreshTimer = null;
       let conversationMapScrollFrame = null;
+
+      const MODEL_PRESET_GROUPS = [
+        {
+          key: "deepseek",
+          label: "DeepSeek",
+          match: /deepseek/i,
+          models: ["deepseek-v4-flash", "deepseek-v4-pro"],
+          allowCustom: false,
+        },
+        {
+          key: "agnes",
+          label: "Agnes",
+          match: /agnes|apihub/i,
+          models: ["agnes-2.0-flash"],
+          allowCustom: true,
+        },
+        {
+          key: "openai",
+          label: "OpenAI",
+          match: /openai|gpt-|o3|o4/i,
+          models: ["gpt-4.1", "gpt-4.1-mini", "gpt-4o", "gpt-4o-mini", "o4-mini"],
+          allowCustom: true,
+        },
+      ];
+      const DEFAULT_MODEL_PRESETS = ["custom-model", "gpt-4.1-mini"];
 
       function setRetryDisabled(disabled) {
         retryButton.disabled = disabled;
@@ -5111,40 +5457,250 @@
         }
       }
 
+      function setActiveNavigation(activeButton = conversationNav) {
+        for (const button of [
+          conversationNav,
+          memoryLibraryNav,
+          skillLibraryNav,
+          analyticsNav,
+          modelSettingsNav,
+        ]) {
+          button.classList.toggle("active", button === activeButton);
+        }
+      }
+
       function setModelFeedback(message = "", status = "") {
         modelSettingsFeedback.textContent = message;
         modelSettingsFeedback.dataset.status = status;
       }
 
+      function setModelTestStatus(message = "当前未进行在线测试", status = "") {
+        modelTestStatus.textContent = message;
+        modelTestStatus.dataset.status = status;
+      }
+
+      function captureModelFormState() {
+        return {
+          label: modelConfigLabel.value.trim(),
+          provider: modelConfigProvider.value.trim(),
+          baseURL: modelConfigBaseUrl.value.trim(),
+          preset: modelPresetSelect.value,
+          model: modelConfigModel.value.trim(),
+          hasNewApiKey: Boolean(modelConfigApiKey.value.trim()),
+        };
+      }
+
+      function setFieldDirty(input, dirty) {
+        input.closest("label")?.classList.toggle("is-dirty", Boolean(dirty));
+      }
+
+      function markModelSnapshot() {
+        selectedModelSnapshot = captureModelFormState();
+        updateModelEditState();
+      }
+
+      function updateModelEditState() {
+        const current = captureModelFormState();
+        const baseline = selectedModelSnapshot;
+        const dirty = Boolean(
+          baseline &&
+          (
+            current.label !== baseline.label ||
+            current.provider !== baseline.provider ||
+            current.baseURL !== baseline.baseURL ||
+            current.preset !== baseline.preset ||
+            current.model !== baseline.model ||
+            current.hasNewApiKey
+          )
+        );
+        setFieldDirty(modelConfigLabel, baseline && current.label !== baseline.label);
+        setFieldDirty(modelConfigProvider, baseline && current.provider !== baseline.provider);
+        setFieldDirty(modelConfigBaseUrl, baseline && current.baseURL !== baseline.baseURL);
+        setFieldDirty(modelPresetSelect, baseline && current.preset !== baseline.preset);
+        setFieldDirty(modelConfigModel, baseline && current.model !== baseline.model);
+        setFieldDirty(modelConfigApiKey, current.hasNewApiKey);
+        modelConfigForm.classList.toggle("has-unsaved", dirty);
+        modelEditState.textContent = dirty
+          ? "未保存"
+          : selectedModelConfigId
+            ? "已保存"
+            : "新配置";
+        modelEditState.dataset.status = dirty ? "dirty" : "";
+        saveModelConfig.textContent = dirty ? "保存更改 *" : "保存更改";
+      }
+
       function closeModelSettingsDialog() {
         if (modelSettingsDialog.hidden) return;
         modelSettingsDialog.hidden = true;
-        modelSettingsNav.classList.remove("active");
-        conversationNav.classList.add("active");
+        setActiveNavigation();
         clearSelectedModel();
       }
 
       function clearSelectedModel() {
         selectedModelConfigId = null;
+        selectedModelSnapshot = null;
         modelConfigForm.reset();
-        modelConfigForm.querySelector(".model-panel-head h3").textContent = "模型详情";
+        modelConfigApiKey.type = "password";
+        modelConfigApiKey.required = true;
+        modelConfigApiKey.placeholder = "sk-...";
+        toggleApiKeyVisibility.innerHTML = '<i class="ph ph-eye" aria-hidden="true"></i>';
+        toggleApiKeyVisibility.title = "显示密钥";
+        toggleApiKeyVisibility.setAttribute("aria-label", "显示密钥");
+        syncModelPresetOptions();
+        setModelTestStatus();
+        modelDetailTitle.textContent = "新增模型";
         setModelFeedback();
+        markModelSnapshot();
+      }
+
+      function currentProviderText() {
+        return [
+          modelConfigProvider.value,
+          modelConfigBaseUrl.value,
+          modelConfigModel.value,
+        ].join(" ");
+      }
+
+      function inferProviderName(provider, baseURL, model) {
+        const explicitProvider = String(provider || "").replace(/\s+/g, " ").trim();
+        const isGeneric = /^(openai\s*compatible|openai\s*兼容|兼容|openai)$/i.test(explicitProvider);
+        const explicitSource = explicitProvider.toLowerCase();
+        if (!isGeneric && explicitSource.includes("deepseek")) return "DeepSeek";
+        if (!isGeneric && (explicitSource.includes("agnes") || explicitSource.includes("apihub"))) return "Agnes";
+        if (!isGeneric && explicitSource.includes("openai")) return "OpenAI";
+        if (explicitProvider && !isGeneric) return explicitProvider;
+        const providerSource = String(baseURL || "").toLowerCase();
+        if (providerSource.includes("deepseek")) return "DeepSeek";
+        if (providerSource.includes("agnes") || providerSource.includes("apihub")) return "Agnes";
+        if (providerSource.includes("openai")) return "OpenAI";
+        const modelSource = String(model || "").toLowerCase();
+        if (modelSource.includes("deepseek")) return "DeepSeek";
+        if (modelSource.includes("agnes") || modelSource.includes("apihub")) return "Agnes";
+        if (/gpt-|(^|[^a-z])o[34]/i.test(modelSource)) return "OpenAI";
+        return "自定义供应商";
+      }
+
+      function inferProviderNameFromModel(model) {
+        return inferProviderName(model?.provider, model?.baseURL, model?.model);
+      }
+
+      function accessFormatForModel(model) {
+        return model ? "OpenAI 兼容" : "-";
+      }
+
+      function getProviderDisplayName(model) {
+        return inferProviderNameFromModel(model);
+      }
+
+      function inferPresetGroup() {
+        const explicitProvider = modelConfigProvider.value.replace(/\s+/g, " ").trim();
+        const genericProvider = /^(openai\s*compatible|openai\s*兼容|兼容|openai)$/i.test(explicitProvider);
+        if (explicitProvider && !genericProvider) {
+          const explicitGroup = MODEL_PRESET_GROUPS.find((group) =>
+            group.match.test(explicitProvider)
+          );
+          if (explicitGroup) return explicitGroup;
+        }
+        const providerSource = modelConfigBaseUrl.value;
+        return (
+          MODEL_PRESET_GROUPS.find((group) => group.match.test(providerSource)) ||
+          MODEL_PRESET_GROUPS.find((group) => group.match.test(modelConfigModel.value)) ||
+          null
+        );
+      }
+
+      function commonModelsForCurrentProvider() {
+        return inferPresetGroup()?.models ?? DEFAULT_MODEL_PRESETS;
+      }
+
+      function syncModelPresetOptions(normalizeConflictingModel = false) {
+        const currentModel = modelConfigModel.value.trim();
+        const presetGroup = inferPresetGroup();
+        const models = presetGroup?.models ?? DEFAULT_MODEL_PRESETS;
+        const allowCustom = presetGroup?.allowCustom ?? true;
+        modelPresetSelect.textContent = "";
+        for (const model of models) {
+          const option = document.createElement("option");
+          option.value = model;
+          option.textContent = model;
+          modelPresetSelect.append(option);
+        }
+        if (allowCustom) {
+          const custom = document.createElement("option");
+          custom.value = "__custom__";
+          custom.textContent = "自定义模型";
+          modelPresetSelect.append(custom);
+          const matched = models.find(
+            (model) => model.toLowerCase() === currentModel.toLowerCase()
+          );
+          const conflictingGroup = MODEL_PRESET_GROUPS.find(
+            (group) => group !== presetGroup && group.match.test(currentModel)
+          );
+          if (normalizeConflictingModel && !matched && conflictingGroup && models[0]) {
+            modelConfigModel.value = models[0];
+            modelPresetSelect.value = models[0];
+            return;
+          }
+          modelPresetSelect.value = matched || "__custom__";
+          return;
+        }
+        const matched = models.find(
+          (model) => model.toLowerCase() === currentModel.toLowerCase()
+        );
+        modelPresetSelect.value = matched || models[0] || "";
+      }
+
+      function setApiKeyVisibility(visible) {
+        modelConfigApiKey.type = visible ? "text" : "password";
+        toggleApiKeyVisibility.innerHTML = visible
+          ? '<i class="ph ph-eye-slash" aria-hidden="true"></i>'
+          : '<i class="ph ph-eye" aria-hidden="true"></i>';
+        toggleApiKeyVisibility.title = visible ? "隐藏密钥" : "显示密钥";
+        toggleApiKeyVisibility.setAttribute("aria-label", visible ? "隐藏密钥" : "显示密钥");
+      }
+
+      function modelConfigPayload() {
+        const payload = {
+          label: modelConfigLabel.value,
+          provider: modelConfigProvider.value,
+          baseURL: modelConfigBaseUrl.value,
+          model: modelConfigModel.value,
+        };
+        if (selectedModelConfigId) payload.modelId = selectedModelConfigId;
+        if (modelConfigApiKey.value.trim()) {
+          payload.apiKey = modelConfigApiKey.value;
+        }
+        return payload;
+      }
+
+      function getSelectedModelConfig() {
+        return selectedModelConfigId
+          ? modelSettings.models.find((model) => model.id === selectedModelConfigId) || null
+          : null;
       }
 
       function selectModelConfig(model) {
         selectedModelConfigId = model.id;
         modelConfigLabel.value = model.label || "";
-        modelConfigProvider.value = model.provider || "";
+        modelConfigProvider.value = inferProviderNameFromModel(model);
         modelConfigBaseUrl.value = model.baseURL || "";
         modelConfigModel.value = model.model || "";
         modelConfigApiKey.value = "";
-        modelConfigForm.querySelector(".model-panel-head h3").textContent = "编辑模型";
-        setModelFeedback("已选择模型，修改后点击保存。API Key 留空则不更新。");
+        modelConfigApiKey.required = false;
+        modelConfigApiKey.placeholder = model.hasApiKey
+          ? "已保存密钥，留空则不更新"
+          : "输入密钥";
+        setApiKeyVisibility(false);
+        syncModelPresetOptions();
+        setModelTestStatus("当前未进行在线测试");
+        modelDetailTitle.textContent = `编辑 ${inferProviderNameFromModel(model)}`;
+        setModelFeedback("已选择模型，修改后点击保存。密钥留空则不更新。");
+        markModelSnapshot();
         renderModelConfigs();
       }
 
       function describeModel(model) {
-        return `${model.provider || "OpenAI 兼容"} · ${model.model}`;
+        return `${inferProviderNameFromModel(model)} · ${model.model}`;
       }
 
       function getModelDisplayName(model) {
@@ -5156,7 +5712,7 @@
         const model = activeModel || modelSettings.activeModel;
         activeModelName.textContent = model?.model || "未配置";
         activeModelMeta.textContent = model ? describeModel(model) : "-";
-        activeModelProvider.textContent = model?.provider || "-";
+        activeModelProvider.textContent = accessFormatForModel(model);
         activeModelId.textContent = model?.model || "-";
         activeModelNavLabel.textContent = model?.model || "未配置";
       }
@@ -5189,13 +5745,10 @@
           const title = document.createElement("div");
           title.className = "model-config-title";
           const name = document.createElement("strong");
-          name.textContent = getModelDisplayName(model);
+          name.textContent = getProviderDisplayName(model);
           const meta = document.createElement("span");
-          meta.textContent = describeModel(model);
-          const base = document.createElement("span");
-          base.className = "model-config-meta";
-          base.textContent = model.baseURL;
-          title.append(name, meta, base);
+          meta.textContent = "供应商";
+          title.append(name, meta);
           const badge = document.createElement("span");
           badge.className = "model-config-badge";
           badge.textContent = model.active ? "使用中" : model.builtIn ? "内置" : "自定义";
@@ -5251,11 +5804,13 @@
         if (!response.ok) throw new Error(data.error || "读取模型配置失败");
         modelSettings = data;
         renderModelConfigs();
+        const activeOrFirst = modelSettings.models.find((model) => model.active) || modelSettings.models[0];
+        if (activeOrFirst) selectModelConfig(activeOrFirst);
       }
 
       async function openModelSettingsDialog() {
-        modelSettingsNav.classList.add("active");
-        conversationNav.classList.remove("active");
+        closeWorkspacePanelDialog({ keepNavigation: true });
+        setActiveNavigation(modelSettingsNav);
         modelSettingsDialog.hidden = false;
         setModelFeedback("正在读取模型配置...");
         try {
@@ -5275,9 +5830,20 @@
           model: "custom-model",
         };
         modelConfigLabel.value = template.label;
-        modelConfigProvider.value = template.provider;
+        modelConfigProvider.value = inferProviderName(template.provider, template.baseURL, template.model);
         modelConfigBaseUrl.value = template.baseURL;
         modelConfigModel.value = template.model;
+        modelConfigApiKey.required = true;
+        modelConfigApiKey.placeholder = "sk-...";
+        setApiKeyVisibility(false);
+        syncModelPresetOptions();
+        setModelTestStatus();
+        modelDetailTitle.textContent = `新增 ${inferProviderName(
+          modelConfigProvider.value,
+          modelConfigBaseUrl.value,
+          modelConfigModel.value
+        )}`;
+        markModelSnapshot();
         modelConfigApiKey.focus();
       }
 
@@ -5313,6 +5879,400 @@
         }
         await loadModelSettings();
         setModelFeedback("模型配置已删除。", "success");
+      }
+
+      function closeWorkspacePanelDialog(options = {}) {
+        if (workspacePanelDialog.hidden) return;
+        workspacePanelDialog.hidden = true;
+        workspacePanelBody.textContent = "";
+        workspacePanelActions.textContent = "";
+        if (!options.keepNavigation) setActiveNavigation();
+      }
+
+      function setWorkspaceHeader(kind) {
+        const meta = {
+          memory: {
+            title: "记忆库",
+            subtitle: "查看、遗忘和清空长期记忆。",
+            icon: '<i class="ph ph-brain" aria-hidden="true"></i>',
+          },
+          skills: {
+            title: "能力插件",
+            subtitle: "查看当前 Agent 可调用的内置技能。",
+            icon: '<i class="ph ph-plug" aria-hidden="true"></i>',
+          },
+          analytics: {
+            title: "数据分析",
+            subtitle: "查看会话、消息和工具调用概况。",
+            icon: '<i class="ph ph-chart-bar" aria-hidden="true"></i>',
+          },
+        }[kind];
+        workspacePanelTitle.textContent = meta.title;
+        workspacePanelSubtitle.textContent = meta.subtitle;
+        workspacePanelIcon.innerHTML = meta.icon;
+      }
+
+      function setWorkspaceLoading(message = "正在读取数据...") {
+        workspacePanelActions.textContent = "";
+        workspacePanelBody.innerHTML = "";
+        const empty = document.createElement("div");
+        empty.className = "workspace-empty-state";
+        empty.textContent = message;
+        workspacePanelBody.append(empty);
+      }
+
+      function appendSummaryCard(container, label, value) {
+        const card = document.createElement("div");
+        card.className = "workspace-summary-card";
+        const labelNode = document.createElement("span");
+        labelNode.textContent = label;
+        const valueNode = document.createElement("strong");
+        valueNode.textContent = String(value);
+        card.append(labelNode, valueNode);
+        container.append(card);
+      }
+
+      function renderWorkspaceEmpty(message, actionText, actionHandler) {
+        workspacePanelBody.innerHTML = "";
+        const empty = document.createElement("div");
+        empty.className = "workspace-empty-state";
+        const copy = document.createElement("span");
+        copy.textContent = message;
+        empty.append(copy);
+        if (actionText && actionHandler) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = actionText;
+          button.addEventListener("click", actionHandler);
+          empty.append(button);
+        }
+        workspacePanelBody.append(empty);
+      }
+
+      function formatWorkspaceTime(value) {
+        if (!value) return "-";
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return "-";
+        return new Intl.DateTimeFormat("zh-CN", {
+          month: "2-digit",
+          day: "2-digit",
+          hour: "2-digit",
+          minute: "2-digit",
+          hour12: false,
+        }).format(date);
+      }
+
+      const MEMORY_CATEGORY_LABELS = {
+        profile: "资料",
+        preference: "偏好",
+        dislike: "避雷",
+        boundary: "边界",
+        goal: "目标",
+        fact: "事实",
+      };
+
+      function renderMemoryLibrary(data) {
+        workspacePanelBody.innerHTML = "";
+        workspacePanelActions.textContent = "";
+        const memories = Array.isArray(data.memories) ? data.memories : [];
+        const stats = data.stats || {};
+
+        // 刷新按钮 — 始终显示，方便用户手动重新加载记忆
+        const refreshButton = document.createElement("button");
+        refreshButton.type = "button";
+        refreshButton.className = "workspace-secondary-btn";
+        refreshButton.textContent = "刷新";
+        refreshButton.addEventListener("click", loadMemoryLibrary);
+        workspacePanelActions.append(refreshButton);
+
+        const summary = document.createElement("div");
+        summary.className = "workspace-summary-grid";
+        appendSummaryCard(summary, "已激活", stats.active || 0);
+        appendSummaryCard(summary, "候选记忆", stats.candidates || 0);
+        appendSummaryCard(summary, "已遗忘", stats.forgotten || 0);
+        workspacePanelBody.append(summary);
+
+        if (memories.length > 0) {
+          const clearButton = document.createElement("button");
+          clearButton.type = "button";
+          clearButton.className = "workspace-danger-btn";
+          clearButton.textContent = "清空记忆";
+          clearButton.addEventListener("click", clearAllMemories);
+          workspacePanelActions.append(clearButton);
+        }
+
+        if (!memories.length) {
+          const empty = document.createElement("div");
+          empty.className = "workspace-empty-state";
+          empty.textContent = "还没有长期记忆。和银狼多聊几轮，稳定偏好会在这里出现。";
+          workspacePanelBody.append(empty);
+          return;
+        }
+
+        const list = document.createElement("div");
+        list.className = "workspace-list";
+        for (const memory of memories) {
+          const item = document.createElement("article");
+          item.className = "workspace-list-item";
+          const copy = document.createElement("div");
+          copy.className = "workspace-list-copy";
+          const title = document.createElement("strong");
+          title.textContent = MEMORY_CATEGORY_LABELS[memory.category] || "记忆";
+          const content = document.createElement("p");
+          content.textContent = memory.content || "";
+          const meta = document.createElement("div");
+          meta.className = "workspace-list-meta";
+          for (const text of [
+            memory.status === "active" ? "已激活" : "候选",
+            `证据 ${memory.evidenceCount || 0}`,
+            `置信 ${Math.round(Number(memory.confidence || 0) * 100)}%`,
+            `更新 ${formatWorkspaceTime(memory.updatedAt)}`,
+          ]) {
+            const chip = document.createElement("span");
+            chip.className = "workspace-chip";
+            chip.textContent = text;
+            meta.append(chip);
+          }
+          copy.append(title, content, meta);
+          const forget = document.createElement("button");
+          forget.type = "button";
+          forget.className = "workspace-danger-btn";
+          forget.textContent = "遗忘";
+          forget.addEventListener("click", () => forgetMemory(memory.id, memory.content));
+          item.append(copy, forget);
+          list.append(item);
+        }
+        workspacePanelBody.append(list);
+      }
+
+      async function loadMemoryLibrary() {
+        setWorkspaceLoading("正在读取记忆库...");
+        const response = await apiFetch("/memory?candidates=1", { cache: "no-store" });
+        const data = await response.json().catch(() => ({}));
+        if (response.status === 401) {
+          renderWorkspaceEmpty("登录后才能查看和管理长期记忆。", "登录 / 注册", () => {
+            closeWorkspacePanelDialog();
+            authDialog.showModal();
+            switchAuthMode("login");
+          });
+          memoryNavLabel.textContent = "需登录";
+          return;
+        }
+        if (!response.ok) throw new Error(data.error || "读取记忆库失败");
+        memoryNavLabel.textContent = `${Number(data.stats?.active || 0)} 条`;
+        renderMemoryLibrary(data);
+      }
+
+      async function forgetMemory(memoryId, content) {
+        const confirmed = await openActionDialog({
+          title: "遗忘这条记忆",
+          message: `从长期记忆中移除“${String(content || "").slice(0, 40)}”？`,
+          confirmText: "遗忘",
+          danger: true,
+        });
+        if (!confirmed) return;
+        const response = await apiFetch(`/memory/${encodeURIComponent(memoryId)}`, { method: "DELETE" });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "遗忘记忆失败");
+        await loadMemoryLibrary();
+        await refreshPermanentMemoryStats();
+        showToast("记忆已遗忘");
+      }
+
+      async function clearAllMemories() {
+        const confirmed = await openActionDialog({
+          title: "清空记忆库",
+          message: "所有长期记忆都会被删除，后续需要重新从对话中积累。",
+          confirmText: "清空",
+          danger: true,
+        });
+        if (!confirmed) return;
+        const response = await apiFetch("/memory", { method: "DELETE" });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "清空记忆失败");
+        await loadMemoryLibrary();
+        await refreshPermanentMemoryStats();
+        showToast(`已清空 ${data.deleted || 0} 条记忆`);
+      }
+
+      function renderSkillsLibrary(data) {
+        workspacePanelBody.innerHTML = "";
+        workspacePanelActions.textContent = "";
+        const skills = Array.isArray(data.skills) ? data.skills : [];
+        const summary = document.createElement("div");
+        summary.className = "workspace-summary-grid";
+        appendSummaryCard(summary, "在线技能", skills.length);
+        appendSummaryCard(summary, "类型", "内置");
+        appendSummaryCard(summary, "状态", "可调用");
+        workspacePanelBody.append(summary);
+
+        if (!skills.length) {
+          const empty = document.createElement("div");
+          empty.className = "workspace-empty-state";
+          empty.textContent = "当前没有发现可用技能。";
+          workspacePanelBody.append(empty);
+          return;
+        }
+
+        const list = document.createElement("div");
+        list.className = "workspace-list";
+        for (const skill of skills) {
+          const item = document.createElement("article");
+          item.className = "workspace-list-item";
+          const copy = document.createElement("div");
+          copy.className = "workspace-list-copy";
+          const title = document.createElement("strong");
+          title.textContent = skill.name || "未命名技能";
+          const description = document.createElement("p");
+          description.textContent = skill.description || "暂无描述";
+          const meta = document.createElement("div");
+          meta.className = "workspace-list-meta";
+          for (const text of [`v${skill.version || "1.0.0"}`, skill.status === "online" ? "在线" : "离线", skill.builtIn ? "内置" : "自定义"]) {
+            const chip = document.createElement("span");
+            chip.className = "workspace-chip";
+            chip.textContent = text;
+            meta.append(chip);
+          }
+          copy.append(title, description, meta);
+          item.append(copy);
+          list.append(item);
+        }
+        workspacePanelBody.append(list);
+      }
+
+      async function loadSkillsLibrary() {
+        setWorkspaceLoading("正在读取能力插件...");
+        const response = await apiFetch("/settings/skills", { cache: "no-store" });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "读取能力插件失败");
+        skillNavLabel.textContent = `${Array.isArray(data.skills) ? data.skills.length : 0} 项`;
+        renderSkillsLibrary(data);
+      }
+
+      async function refreshSkillsBadge() {
+        try {
+          const response = await apiFetch("/settings/skills", { cache: "no-store" });
+          if (!response.ok) return;
+          const data = await response.json();
+          skillNavLabel.textContent = `${Array.isArray(data.skills) ? data.skills.length : 0} 项`;
+        } catch {
+          // Navigation badges are informational only.
+        }
+      }
+
+      async function renderAnalyticsPanel() {
+        setWorkspaceLoading("正在汇总数据...");
+        await refreshSessions();
+        const totalMessages = sessions.reduce((total, session) => total + Number(session.messageCount || 0), 0);
+        const summaries = sessions.filter((session) => session.hasSummary).length;
+        const todayKey = new Intl.DateTimeFormat("zh-CN", {
+          timeZone: "Asia/Shanghai",
+          year: "numeric",
+          month: "2-digit",
+          day: "2-digit",
+        }).format(new Date());
+        const activeToday = sessions.filter((session) => {
+          const updated = new Intl.DateTimeFormat("zh-CN", {
+            timeZone: "Asia/Shanghai",
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          }).format(new Date(session.updatedAt));
+          return updated === todayKey;
+        }).length;
+
+        let toolRuns = [];
+        if (sessionId) {
+          const response = await apiFetch(
+            `/history/sessions/${encodeURIComponent(sessionId)}/tools?limit=50`,
+            { cache: "no-store" }
+          );
+          if (response.ok) {
+            const data = await response.json();
+            toolRuns = Array.isArray(data.toolRuns) ? data.toolRuns : [];
+          }
+        }
+
+        workspacePanelBody.innerHTML = "";
+        workspacePanelActions.textContent = "";
+        const summary = document.createElement("div");
+        summary.className = "workspace-summary-grid";
+        appendSummaryCard(summary, "对话数量", sessions.length);
+        appendSummaryCard(summary, "消息总数", totalMessages);
+        appendSummaryCard(summary, "今日活跃", activeToday);
+        appendSummaryCard(summary, "已摘要", summaries);
+        appendSummaryCard(summary, "当前工具", toolRuns.length);
+        appendSummaryCard(summary, "平均消息", sessions.length ? Math.round(totalMessages / sessions.length) : 0);
+        workspacePanelBody.append(summary);
+
+        const list = document.createElement("div");
+        list.className = "workspace-list";
+        const recentSessions = sessions.slice(0, 5);
+        for (const session of recentSessions) {
+          const item = document.createElement("article");
+          item.className = "workspace-list-item";
+          const copy = document.createElement("div");
+          copy.className = "workspace-list-copy";
+          const title = document.createElement("strong");
+          title.textContent = session.title || "新对话";
+          const description = document.createElement("p");
+          description.textContent = `${session.messageCount || 0} 条消息 · ${session.hasSummary ? "已有摘要" : "未生成摘要"}`;
+          const meta = document.createElement("div");
+          meta.className = "workspace-list-meta";
+          const chip = document.createElement("span");
+          chip.className = "workspace-chip";
+          chip.textContent = `更新 ${formatWorkspaceTime(session.updatedAt)}`;
+          meta.append(chip);
+          copy.append(title, description, meta);
+          item.append(copy);
+          list.append(item);
+        }
+
+        if (toolRuns.length > 0) {
+          for (const run of toolRuns.slice(0, 5)) {
+            const item = document.createElement("article");
+            item.className = "workspace-list-item";
+            const copy = document.createElement("div");
+            copy.className = "workspace-list-copy";
+            const title = document.createElement("strong");
+            title.textContent = `${run.provider || run.toolType || "tool"} · ${run.status || "success"}`;
+            const description = document.createElement("p");
+            description.textContent = run.query || "工具调用";
+            const meta = document.createElement("div");
+            meta.className = "workspace-list-meta";
+            for (const text of [`结果 ${Array.isArray(run.results) ? run.results.length : 0}`, `抓取 ${formatWorkspaceTime(run.fetchedAt)}`]) {
+              const chip = document.createElement("span");
+              chip.className = "workspace-chip";
+              chip.textContent = text;
+              meta.append(chip);
+            }
+            copy.append(title, description, meta);
+            item.append(copy);
+            list.append(item);
+          }
+        }
+
+        if (list.children.length > 0) workspacePanelBody.append(list);
+        analyticsNavLabel.textContent = `${totalMessages} 消息`;
+      }
+
+      async function openWorkspacePanel(kind) {
+        closeModelSettingsDialog();
+        setSessionPanelOpen(false);
+        setWorkspaceHeader(kind);
+        workspacePanelDialog.hidden = false;
+        setActiveNavigation({
+          memory: memoryLibraryNav,
+          skills: skillLibraryNav,
+          analytics: analyticsNav,
+        }[kind]);
+        try {
+          if (kind === "memory") await loadMemoryLibrary();
+          else if (kind === "skills") await loadSkillsLibrary();
+          else await renderAnalyticsPanel();
+        } catch (error) {
+          renderWorkspaceEmpty(error instanceof Error ? error.message : "读取数据失败");
+        }
       }
 
       function setProfileFeedback(message = "", status = "") {
@@ -5907,11 +6867,16 @@
       async function refreshPermanentMemoryStats() {
         try {
           const response = await apiFetch("/memory/stats", { cache: "no-store" });
+          if (response.status === 401) {
+            memoryNavLabel.textContent = "需登录";
+            return;
+          }
           if (!response.ok) return;
           const data = await response.json();
           const activeMemories = Number(data?.stats?.active || 0);
           const memoryPercent = Math.min(100, Math.round((activeMemories / 50) * 100));
           memoryValue.textContent = `${activeMemories} 条`;
+          memoryNavLabel.textContent = `${activeMemories} 条`;
           memoryBar.style.width = `${memoryPercent}%`;
           memoryBar.title = `已激活 ${activeMemories} 条永久记忆`;
         } catch {
@@ -6164,6 +7129,7 @@
         await ensureAuthentication();
         await loadModelSettings();
         await initializeSessions();
+        await refreshSkillsBadge();
       }
 
       function parseSSE(buffer) {
@@ -6410,11 +7376,26 @@
       }
 
       conversationNav.addEventListener("click", () => {
+        closeWorkspacePanelDialog();
         closeModelSettingsDialog();
+        setActiveNavigation(conversationNav);
         setSessionPanelOpen(true);
       });
 
+      memoryLibraryNav.addEventListener("click", () => {
+        openWorkspacePanel("memory").catch(showActionError);
+      });
+
+      skillLibraryNav.addEventListener("click", () => {
+        openWorkspacePanel("skills").catch(showActionError);
+      });
+
+      analyticsNav.addEventListener("click", () => {
+        openWorkspacePanel("analytics").catch(showActionError);
+      });
+
       modelSettingsNav.addEventListener("click", () => {
+        closeWorkspacePanelDialog({ keepNavigation: true });
         setSessionPanelOpen(false);
         openModelSettingsDialog();
       });
@@ -6479,6 +7460,16 @@
       });
 
       actionCancel.addEventListener("click", () => closeActionDialog(null));
+
+      workspacePanelClose.addEventListener("click", closeWorkspacePanelDialog);
+
+      workspacePanelDialog.addEventListener("click", (event) => {
+        if (event.target === workspacePanelDialog) closeWorkspacePanelDialog();
+      });
+
+      workspacePanelDialog.addEventListener("keydown", (event) => {
+        if (event.key === "Escape") closeWorkspacePanelDialog();
+      });
 
       actionForm.addEventListener("submit", (event) => {
         event.preventDefault();
@@ -6708,13 +7699,103 @@
         if (event.key === "Escape") closeModelSettingsDialog();
       });
 
-      refreshModels.addEventListener("click", () => {
+      newModelConfig.addEventListener("click", () => {
         clearSelectedModel();
         fillCompatibleTemplate();
         setModelFeedback("已载入通用模型模板。", "success");
       });
 
       useCompatibleTemplate.addEventListener("click", fillCompatibleTemplate);
+
+      modelPresetSelect.addEventListener("change", () => {
+        if (modelPresetSelect.value === "__custom__") {
+          updateModelEditState();
+          modelConfigModel.focus();
+          return;
+        }
+        modelConfigModel.value = modelPresetSelect.value;
+        updateModelEditState();
+      });
+
+      modelConfigLabel.addEventListener("input", updateModelEditState);
+      modelConfigProvider.addEventListener("input", () => {
+        syncModelPresetOptions(true);
+        modelDetailTitle.textContent = selectedModelConfigId
+          ? `编辑 ${inferProviderName(
+              modelConfigProvider.value,
+              modelConfigBaseUrl.value,
+              modelConfigModel.value
+            )}`
+          : `新增 ${inferProviderName(
+              modelConfigProvider.value,
+              modelConfigBaseUrl.value,
+              modelConfigModel.value
+            )}`;
+        updateModelEditState();
+      });
+      modelConfigBaseUrl.addEventListener("input", () => {
+        syncModelPresetOptions(true);
+        modelDetailTitle.textContent = selectedModelConfigId
+          ? `编辑 ${inferProviderName(
+              modelConfigProvider.value,
+              modelConfigBaseUrl.value,
+              modelConfigModel.value
+            )}`
+          : `新增 ${inferProviderName(
+              modelConfigProvider.value,
+              modelConfigBaseUrl.value,
+              modelConfigModel.value
+            )}`;
+        updateModelEditState();
+      });
+      modelConfigModel.addEventListener("input", () => {
+        syncModelPresetOptions(false);
+        modelDetailTitle.textContent = selectedModelConfigId
+          ? `编辑 ${inferProviderName(
+              modelConfigProvider.value,
+              modelConfigBaseUrl.value,
+              modelConfigModel.value
+            )}`
+          : `新增 ${inferProviderName(
+              modelConfigProvider.value,
+              modelConfigBaseUrl.value,
+              modelConfigModel.value
+            )}`;
+        updateModelEditState();
+      });
+      modelConfigApiKey.addEventListener("input", updateModelEditState);
+
+      toggleApiKeyVisibility.addEventListener("click", () => {
+        setApiKeyVisibility(modelConfigApiKey.type === "password");
+        modelConfigApiKey.focus();
+      });
+
+      testModelConfig.addEventListener("click", async () => {
+        testModelConfig.disabled = true;
+        setModelTestStatus("正在测试密钥...");
+        setModelFeedback();
+        try {
+          const payload = modelConfigPayload();
+          if (!payload.apiKey && !payload.modelId) {
+            throw new Error("请先输入密钥再测试。");
+          }
+          const response = await apiFetch("/settings/models/test", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          const data = await response.json().catch(() => ({}));
+          if (!response.ok) throw new Error(data.error || "测试失败");
+          setModelTestStatus("密钥可用", "success");
+          setModelFeedback(`测试通过：${data.model || payload.model}`, "success");
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "测试失败";
+          setModelTestStatus("测试失败", "error");
+          setModelFeedback(message, "error");
+        } finally {
+          testModelConfig.disabled = false;
+        }
+      });
 
       deleteCurrentModel.addEventListener("click", () => {
         if (!selectedModelConfigId) {
@@ -6737,28 +7818,37 @@
         event.preventDefault();
         saveModelConfig.disabled = true;
         const isEditing = selectedModelConfigId !== null;
-        setModelFeedback(isEditing ? "正在保存修改..." : "正在保存模型...");
+        const selectedModel = getSelectedModelConfig();
+        const saveAsCopy = Boolean(selectedModel?.builtIn);
+        setModelFeedback(saveAsCopy ? "正在另存为自定义模型..." : isEditing ? "正在保存修改..." : "正在保存模型...");
         try {
-          const payload = {
-            label: modelConfigLabel.value,
-            provider: modelConfigProvider.value,
-            baseURL: modelConfigBaseUrl.value,
-            model: modelConfigModel.value,
-          };
-          if (modelConfigApiKey.value.trim()) {
-            payload.apiKey = modelConfigApiKey.value;
-          }
+          const payload = modelConfigPayload();
 
           let response;
-          if (isEditing) {
+          if (saveAsCopy) {
+            delete payload.modelId;
+            if (!(payload.apiKey || "").trim()) {
+              throw new Error("内置 .env 配置不可直接编辑；请填写密钥后另存为自定义模型。");
+            }
+            response = await apiFetch("/settings/models", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                ...payload,
+                label: payload.label?.trim() && payload.label !== selectedModel.label
+                  ? payload.label
+                  : `${selectedModel.label || selectedModel.provider || "模型"} 副本`,
+              }),
+            });
+          } else if (isEditing) {
+            delete payload.modelId;
             response = await apiFetch(`/settings/models/${encodeURIComponent(selectedModelConfigId)}`, {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(payload),
             });
           } else {
-            payload.apiKey = modelConfigApiKey.value;
-            if (!payload.apiKey.trim()) throw new Error("API Key 不能为空");
+            if (!(payload.apiKey || "").trim()) throw new Error("密钥不能为空");
             response = await apiFetch("/settings/models", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
@@ -6767,9 +7857,20 @@
           }
           const data = await response.json();
           if (!response.ok) throw new Error(data.error || "保存失败");
+          const createdModelId = data.model?.id;
+          if (saveAsCopy && createdModelId) {
+            const activateResponse = await apiFetch(`/settings/models/${encodeURIComponent(createdModelId)}/activate`, {
+              method: "POST",
+            });
+            const activateData = await activateResponse.json().catch(() => ({}));
+            if (!activateResponse.ok) throw new Error(activateData.error || "模型已保存，但切换失败");
+          }
           clearSelectedModel();
           await loadModelSettings();
-          setModelFeedback(isEditing ? "修改已保存。" : "模型已保存，可在列表中切换。", "success");
+          setModelFeedback(
+            saveAsCopy ? "已另存为自定义模型并切换使用。" : isEditing ? "修改已保存。" : "模型已保存，可在列表中切换。",
+            "success"
+          );
         } catch (error) {
           setModelFeedback(error instanceof Error ? error.message : "保存失败", "error");
         } finally {

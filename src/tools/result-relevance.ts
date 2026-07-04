@@ -1,4 +1,3 @@
-import { containsCurrentChinaDate } from "../current-date.js";
 import type { ConversationContext } from "../agent/conversation-context.js";
 import type { WebSearchResult } from "./web-search.js";
 import { extractWeatherCity } from "./tool-router.js";
@@ -23,27 +22,6 @@ export function isRelevantWebResult(
       (!location || resultText.includes(location)) &&
       !newsNoise.test(result.title)
     );
-  }
-
-  if (intent === "news") {
-    const noise =
-      /百度百科|是什么年|是个什么年|节假日安排|新年贺词|全国两会专题|全国两会----|国务院办公厅关于.*节假日|放假安排/i;
-    if (noise.test(`${result.title} ${result.snippet} ${result.url}`)) return false;
-
-    const wantsToday =
-      /今天|今日|最新|实时|today/i.test(query) || containsCurrentChinaDate(query);
-    if (wantsToday) {
-      const hasExactDate = containsCurrentChinaDate(
-        `${result.title} ${result.snippet} ${result.content}`
-      );
-      const fromNewsIndex = /来自新闻首页/.test(result.snippet);
-      const isLiveNewsIndex =
-        /新闻频道|时政联播|中国新闻|今日新闻|news\.cctv|news\.cn|xinhuanet|chinanews|cnr\.cn/i.test(
-          `${result.title} ${result.url}`
-        ) && /新闻|时政|国内|国际|头条/.test(`${result.title} ${result.snippet}`);
-      return hasExactDate || fromNewsIndex || isLiveNewsIndex;
-    }
-    return result.sourceType === "news" || /新闻|时政|国内|国际|头条/i.test(text);
   }
 
   if (context.topic !== "hardware") return true;

@@ -1,18 +1,24 @@
 import { Hono } from "hono";
+import OpenAI from "openai";
+import { HttpsProxyAgent } from "https-proxy-agent";
+import { config } from "../config.js";
 import {
   compatibleModelTemplate,
   createLlmModelConfig,
   deepSeekTemplate,
   deleteLlmModelConfig,
   getActiveLlmModelConfig,
+  getLlmModelConfig,
   listLlmModelConfigs,
   setActiveLlmModelConfig,
   toPublicModelConfig,
   updateLlmModelConfig,
   validateLlmModelInput,
   type UpsertLlmModelInput,
+  type PublicLlmModelConfig,
 } from "../llm/model-configs.js";
 import { logger } from "../logger.js";
+import { listSkills } from "../tools/skill-manager.js";
 
 export const settingsRoute = new Hono();
 
@@ -38,16 +44,104 @@ function parsePartialModelInput(
   };
 }
 
+function parseModelTestInput(payload: Record<string, unknown>): UpsertLlmModelInput & {
+  modelId?: string;
+} {
+  return {
+    ...parseModelInput(payload),
+    modelId: typeof payload.modelId === "string" ? payload.modelId : undefined,
+  };
+}
+
+function safeModelTestError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  return message
+    .replace(/sk-[A-Za-z0-9_-]+/g, "sk-***")
+    .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, "Bearer ***")
+    .slice(0, 240);
+}
+
 settingsRoute.get("/models", (c) => {
   const models = listLlmModelConfigs().map(toPublicModelConfig);
+  let activeModel: PublicLlmModelConfig | null = null;
+  try {
+    activeModel = toPublicModelConfig(getActiveLlmModelConfig());
+  } catch {
+    // 没有可用的已激活模型配置
+  }
   return c.json({
-    activeModel: toPublicModelConfig(getActiveLlmModelConfig()),
+    activeModel,
     models,
     templates: {
       compatible: compatibleModelTemplate(),
       deepseek: deepSeekTemplate(),
     },
   });
+});
+
+settingsRoute.get("/skills", (c) => {
+  return c.json({
+    skills: listSkills().map((skill) => ({
+      ...skill,
+      status: "online",
+      builtIn: true,
+    })),
+  });
+});
+
+settingsRoute.post("/models/test", async (c) => {
+  try {
+    const input = parseModelTestInput(await c.req.json<Record<string, unknown>>());
+    const savedModel = input.modelId ? getLlmModelConfig(input.modelId) : null;
+    const resolvedInput: UpsertLlmModelInput = {
+      label: input.label || "模型测试",
+      provider: input.provider,
+      baseURL: input.baseURL,
+      model: input.model,
+      apiKey: input.apiKey.trim() || savedModel?.apiKey || "",
+    };
+    const errors = validateLlmModelInput(resolvedInput);
+    if (errors.length > 0) return c.json({ error: errors.join("；") }, 400);
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15_000);
+    try {
+      const client = new OpenAI({
+        apiKey: resolvedInput.apiKey.trim(),
+        baseURL: resolvedInput.baseURL.trim(),
+        httpAgent: config.llm.proxyURL
+          ? new HttpsProxyAgent(config.llm.proxyURL)
+          : undefined,
+      });
+      const response = await client.chat.completions.create(
+        {
+          model: resolvedInput.model.trim(),
+          messages: [
+            {
+              role: "user",
+              content: "ping",
+            },
+          ],
+          temperature: 0,
+          max_tokens: 4,
+        },
+        { signal: controller.signal }
+      );
+      const content = response.choices[0]?.message?.content ?? "";
+      return c.json({
+        ok: true,
+        model: resolvedInput.model.trim(),
+        replyPreview: content.slice(0, 80),
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+  } catch (err) {
+    logger.warn("settings", "llm model test failed", {
+      error: safeModelTestError(err),
+    });
+    return c.json({ error: `测试失败：${safeModelTestError(err)}` }, 400);
+  }
 });
 
 settingsRoute.post("/models", async (c) => {

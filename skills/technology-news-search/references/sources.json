@@ -1,0 +1,19 @@
+{
+  "note": "本文件曾经包含 75 个 RSS/API 源，现已全部移除。",
+  "reason": "RSS 源在国内访问慢、不稳定，影响用户体验。现统一使用聚合数据 API 作为主力数据源。",
+  "migration": "2026-06-23: 移除全部 RSS 源，仅保留聚合数据 API。",
+  "sources": [
+    {
+      "id": "juhe_news",
+      "name": "聚合数据头条",
+      "url": "https://v.juhe.cn/toutiao/index",
+      "type": "aggregator_api",
+      "enabled": true,
+      "language": "zh",
+      "category": "general",
+      "domains": ["general"],
+      "region": "cn",
+      "priority": 1
+    }
+  ]
+}

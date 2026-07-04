@@ -153,8 +153,9 @@ authRoute.post("/register", async (c) => {
       "INSERT INTO users (id, email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?, ?)"
     ).run(userId, email, passwordHash, displayName, createdAt);
 
-    // Generate token
+    // Generate token (replace any existing tokens)
     const token = generateToken();
+    db.prepare("DELETE FROM user_tokens WHERE user_id = ?").run(userId);
     db.prepare(
       "INSERT INTO user_tokens (token, user_id, created_at) VALUES (?, ?, ?)"
     ).run(token, userId, createdAt);
@@ -209,6 +210,8 @@ authRoute.post("/login", async (c) => {
 
     const token = generateToken();
     const createdAt = new Date().toISOString();
+    // Replace any existing tokens for this user
+    db.prepare("DELETE FROM user_tokens WHERE user_id = ?").run(user.id);
     db.prepare(
       "INSERT INTO user_tokens (token, user_id, created_at) VALUES (?, ?, ?)"
     ).run(token, user.id, createdAt);

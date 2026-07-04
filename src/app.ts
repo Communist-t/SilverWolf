@@ -6,6 +6,7 @@ import { historyRoute } from "./routes/history.js";
 import { authRoute } from "./routes/auth.js";
 import { memoryRoute } from "./routes/memory.js";
 import { settingsRoute } from "./routes/settings.js";
+import { fitnessRoute } from "./routes/fitness.js";
 import { getConversationCacheStats } from "./agent/chat-agent.js";
 import { getSearchCacheStats } from "./tools/web-search.js";
 import { logger } from "./logger.js";
@@ -31,7 +32,8 @@ export function createApp(options: { authToken?: string } = {}): Hono {
       c.req.path.startsWith("/chat") ||
       c.req.path.startsWith("/history") ||
       c.req.path.startsWith("/memory") ||
-      c.req.path.startsWith("/settings")
+      c.req.path.startsWith("/settings") ||
+      c.req.path.startsWith("/fitness")
     ) {
       c.header("Cache-Control", "no-store");
     }
@@ -69,7 +71,8 @@ export function createApp(options: { authToken?: string } = {}): Hono {
       protectsChatApi ||
       c.req.path.startsWith("/history") ||
       c.req.path.startsWith("/memory") ||
-      c.req.path.startsWith("/settings");
+      c.req.path.startsWith("/settings") ||
+      c.req.path.startsWith("/fitness");
     if (
       protectedRoute &&
       authToken &&
@@ -106,6 +109,7 @@ export function createApp(options: { authToken?: string } = {}): Hono {
   app.route("/auth", authRoute);
   app.route("/memory", memoryRoute);
   app.route("/settings", settingsRoute);
+  app.route("/fitness", fitnessRoute);
   app.notFound((c) => c.json({ error: "Not Found" }, 404));
   app.onError((err, c) => {
     logger.error("server", "unhandled request error", {

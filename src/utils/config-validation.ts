@@ -27,9 +27,7 @@ export function collectConfigErrors(
 ): string[] {
   const errors: string[] = [];
   const apiKey = env.LLM_API_KEY?.trim() ?? "";
-  if (!apiKey) {
-    errors.push("缺少环境变量 LLM_API_KEY");
-  } else if (/your[-_ ]?api[-_ ]?key|replace[-_ ]?me|sk-your/i.test(apiKey)) {
+  if (apiKey && /your[-_ ]?api[-_ ]?key|replace[-_ ]?me|sk-your/i.test(apiKey)) {
     errors.push("LLM_API_KEY 仍是示例占位值");
   }
 

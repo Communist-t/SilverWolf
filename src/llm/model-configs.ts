@@ -79,6 +79,20 @@ function inferProvider(baseURL: string, model: string): string {
   return "OpenAI 兼容";
 }
 
+function isGenericAccessFormat(value: string): boolean {
+  return /^(openai\s*compatible|openai\s*兼容|兼容|openai)$/i.test(
+    value.replace(/\s+/g, " ").trim()
+  );
+}
+
+function normalizeProvider(provider: string | undefined, baseURL: string, model: string): string {
+  const normalized = normalizeText(provider ?? "", 40);
+  if (!normalized || isGenericAccessFormat(normalized)) {
+    return normalizeText(inferProvider(baseURL, model), 40);
+  }
+  return normalized;
+}
+
 function validateHttpUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -125,7 +139,50 @@ export function toPublicModelConfig(model: LlmModelConfig): PublicLlmModelConfig
   return { ...safeModel, hasApiKey: Boolean(apiKey.trim()) };
 }
 
+function activateFirstAvailableModel(excludedId?: string): void {
+  const fallback = db
+    .prepare(
+      `
+        SELECT id FROM llm_model_configs
+        WHERE id != ? AND TRIM(api_key) != ''
+        ORDER BY updated_at DESC
+        LIMIT 1
+      `
+    )
+    .get(excludedId ?? "") as { id: string } | undefined;
+  if (!fallback) return;
+
+  db.prepare("UPDATE llm_model_configs SET active = 0").run();
+  db.prepare("UPDATE llm_model_configs SET active = 1, updated_at = ? WHERE id = ?").run(
+    now(),
+    fallback.id
+  );
+}
+
+function removeEnvironmentModelConfig(): void {
+  const existing = db
+    .prepare("SELECT active FROM llm_model_configs WHERE id = ?")
+    .get(ENV_MODEL_ID) as { active: number } | undefined;
+  if (!existing) return;
+
+  db.exec("BEGIN");
+  try {
+    if (existing.active) activateFirstAvailableModel(ENV_MODEL_ID);
+    db.prepare("DELETE FROM llm_model_configs WHERE id = ?").run(ENV_MODEL_ID);
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+}
+
 export function seedEnvironmentModelConfig(): void {
+  const envApiKey = config.llm.apiKey.trim();
+  if (!envApiKey) {
+    removeEnvironmentModelConfig();
+    return;
+  }
+
   const timestamp = now();
   const activeCount = db
     .prepare("SELECT COUNT(*) AS count FROM llm_model_configs WHERE active = 1")
@@ -154,7 +211,7 @@ export function seedEnvironmentModelConfig(): void {
     inferProvider(config.llm.baseURL, config.llm.model),
     config.llm.baseURL,
     config.llm.model,
-    config.llm.apiKey,
+    envApiKey,
     existing ? 0 : activeCount.count === 0 ? 1 : 0,
     timestamp,
     timestamp
@@ -176,8 +233,13 @@ export function getActiveLlmModelConfig(): LlmModelConfig {
     .get() as LlmModelConfigRow | undefined;
   if (row) return mapRow(row);
 
-  setActiveLlmModelConfig(ENV_MODEL_ID);
-  return listLlmModelConfigs()[0]!;
+  activateFirstAvailableModel();
+  const activated = db
+    .prepare("SELECT * FROM llm_model_configs WHERE active = 1 LIMIT 1")
+    .get() as LlmModelConfigRow | undefined;
+  if (activated) return mapRow(activated);
+
+  throw new Error("没有可用的模型配置，请先在模型设置中新增 DeepSeek 配置。");
 }
 
 export function createLlmModelConfig(input: UpsertLlmModelInput): LlmModelConfig {
@@ -187,7 +249,7 @@ export function createLlmModelConfig(input: UpsertLlmModelInput): LlmModelConfig
   const baseURL = input.baseURL.trim();
   const model = normalizeText(input.model, 120);
   const label = normalizeText(input.label, 80);
-  const provider = normalizeText(input.provider || inferProvider(baseURL, model), 40);
+  const provider = normalizeProvider(input.provider, baseURL, model);
   const id = randomUUID();
 
   db.prepare(
@@ -228,7 +290,7 @@ export function updateLlmModelConfig(
     `
   ).run(
     normalizeText(next.label, 80),
-    normalizeText(next.provider || inferProvider(baseURL, model), 40),
+    normalizeProvider(next.provider, baseURL, model),
     baseURL,
     model,
     next.apiKey.trim(),
@@ -267,20 +329,30 @@ export function setActiveLlmModelConfig(id: string): LlmModelConfig | null {
 
 export function deleteLlmModelConfig(id: string): boolean {
   seedEnvironmentModelConfig();
-  const target = getLlmModelConfig(id);
-  if (!target || target.builtIn || target.active) return false;
-  const result = db
-    .prepare("DELETE FROM llm_model_configs WHERE id = ? AND built_in = 0 AND active = 0")
-    .run(id);
-  return result.changes > 0;
+  db.exec("BEGIN");
+  try {
+    const target = getLlmModelConfig(id);
+    if (!target || target.builtIn || target.active) {
+      db.exec("ROLLBACK");
+      return false;
+    }
+    const result = db
+      .prepare("DELETE FROM llm_model_configs WHERE id = ? AND built_in = 0 AND active = 0")
+      .run(id);
+    db.exec("COMMIT");
+    return result.changes > 0;
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
 }
 
 export function deepSeekTemplate(): Pick<LlmModelConfig, "label" | "provider" | "baseURL" | "model"> {
   return {
-    label: "DeepSeek Chat",
+    label: "DeepSeek Flash",
     provider: "DeepSeek",
     baseURL: DEFAULT_DEEPSEEK_BASE_URL,
-    model: "deepseek-chat",
+    model: "deepseek-v4-flash",
   };
 }
 

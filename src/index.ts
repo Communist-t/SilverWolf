@@ -2,7 +2,7 @@
  * 银狼 Agent 服务入口
  *
  * 启动方式：
- *   npm run dev   # 开发模式（热重载）
+ *   npm run dev   # 开发模式
  *   npm start     # 生产模式
  */
 
@@ -32,15 +32,32 @@ async function startServer(): Promise<void> {
     throw error;
   }
 
+  let startupModel = {
+    model: config.llm.model,
+    baseURL: config.llm.baseURL,
+  };
+  try {
+    const { getActiveLlmModelConfig } = await import("./llm/model-configs.js");
+    const activeModel = getActiveLlmModelConfig();
+    startupModel = {
+      model: activeModel.model,
+      baseURL: activeModel.baseURL,
+    };
+  } catch (error) {
+    logger.warn("startup", "active model not ready", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   console.log(`\n🐺 银狼 Agent 启动中...`);
-  console.log(`   模型: ${config.llm.model}`);
+  console.log(`   模型: ${startupModel.model}`);
   console.log(`   监听: ${config.server.host}:${config.server.port}`);
   console.log(`   展示页: http://${config.server.host}:${config.server.port}/`);
   console.log(`   对话页: http://${config.server.host}:${config.server.port}/chat`);
   console.log(`   接口: POST http://${config.server.host}:${config.server.port}/chat\n`);
   logger.info("startup", "server configuration", {
-    model: config.llm.model,
-    baseURL: config.llm.baseURL,
+    model: startupModel.model,
+    baseURL: startupModel.baseURL,
     host: config.server.host,
     port: config.server.port,
     logLevel: config.logging.level,
