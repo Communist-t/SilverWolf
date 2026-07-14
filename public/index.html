@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>银狼 Agent</title>
     <link rel="stylesheet" href="/vendor/phosphor/style.css" />
+    <script src="/config.js"></script>
     <style>
       :root {
         color-scheme: light;
@@ -1639,6 +1640,23 @@
         font-size: 0.92em;
       }
 
+      .message.assistant .content a {
+        color: var(--violet-strong);
+        text-decoration: underline;
+        text-decoration-color: rgba(110, 87, 220, 0.35);
+        text-underline-offset: 3px;
+        transition: color 150ms ease, text-decoration-color 150ms ease;
+      }
+
+      .message.assistant .content a:hover {
+        color: var(--accent);
+        text-decoration-color: var(--accent);
+      }
+
+      .message.assistant .content a:visited {
+        color: #8b6cc7;
+      }
+
       .message.assistant .content .markdown-code-block {
         margin: 12px 0;
         overflow: hidden;
@@ -1720,6 +1738,79 @@
         border-radius: 8px;
         background: var(--surface-solid);
         box-shadow: var(--shadow-soft);
+      }
+
+      .file-preview-area {
+        grid-column: 1 / -1;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding: 6px 0 4px;
+      }
+
+      .file-preview-item {
+        position: relative;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 8px;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--purple-pale);
+        font-size: 12px;
+        max-width: 180px;
+      }
+
+      .file-preview-item img {
+        width: 36px;
+        height: 36px;
+        object-fit: cover;
+        border-radius: 4px;
+      }
+
+      .file-preview-item .file-name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        color: var(--text);
+      }
+
+      .file-preview-item .file-remove {
+        position: absolute;
+        top: -6px;
+        right: -6px;
+        width: 18px;
+        height: 18px;
+        padding: 0;
+        border: 1px solid var(--line);
+        border-radius: 50%;
+        color: var(--muted);
+        background: var(--surface-solid);
+        cursor: pointer;
+        font-size: 11px;
+        line-height: 1;
+        display: grid;
+        place-items: center;
+      }
+
+      .file-preview-item .file-remove:hover {
+        color: var(--danger);
+        border-color: var(--danger);
+      }
+
+      #attachFile {
+        padding: 4px 8px;
+        border: 0;
+        border-radius: 4px;
+        color: var(--muted);
+        background: transparent;
+        cursor: pointer;
+        font-size: 16px;
+        transition: color 150ms ease;
+      }
+
+      #attachFile:hover {
+        color: var(--accent);
       }
 
       #input {
@@ -4877,6 +4968,7 @@
 
         <section class="composer-panel" aria-label="消息输入与运行控制">
           <form id="form">
+            <div id="filePreviewArea" class="file-preview-area" hidden></div>
             <textarea
               id="input"
               name="message"
@@ -4884,8 +4976,10 @@
               autocomplete="off"
               aria-label="消息内容"
             ></textarea>
+            <input type="file" id="fileInput" multiple accept="image/*,.pdf,.txt,.md,.csv,.json,.xml,.html,.css,.js,.ts,.py,.java,.c,.cpp,.go,.rs,.doc,.docx,.xls,.xlsx,.ppt,.pptx" hidden />
             <div class="composer-footer">
               <div class="composer-tools" aria-label="对话工具">
+                <button id="attachFile" type="button" title="上传文件或图片">📎</button>
                 <button id="toggleProcess" type="button" aria-pressed="false">查看过程</button>
                 <button id="renameSession" type="button">重命名</button>
                 <button id="clearChat" type="button">清空</button>
@@ -5198,6 +5292,99 @@
       const leftWorkspace = document.querySelector(".left-workspace");
       const appNavigation = document.querySelector(".app-navigation");
       const sessionSidebar = document.querySelector(".session-sidebar");
+      const fileInput = document.querySelector("#fileInput");
+      const attachFileBtn = document.querySelector("#attachFile");
+      const filePreviewArea = document.querySelector("#filePreviewArea");
+      let pendingFiles = [];
+
+      // ── 文件上传处理 ──────────────────────────────────────────
+      const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+      const IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"]);
+
+      function formatFileSize(bytes) {
+        if (bytes < 1024) return `${bytes}B`;
+        if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
+        return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+      }
+
+      function addFiles(fileList) {
+        for (const file of fileList) {
+          if (file.size > MAX_FILE_SIZE) {
+            showToast(`${file.name} 超过 10MB 限制`);
+            continue;
+          }
+          if (pendingFiles.length >= 5) {
+            showToast("最多同时上传 5 个文件");
+            break;
+          }
+          pendingFiles.push(file);
+        }
+        renderFilePreview();
+      }
+
+      function removeFile(index) {
+        pendingFiles.splice(index, 1);
+        renderFilePreview();
+      }
+
+      function renderFilePreview() {
+        filePreviewArea.innerHTML = "";
+        if (pendingFiles.length === 0) {
+          filePreviewArea.hidden = true;
+          return;
+        }
+        filePreviewArea.hidden = false;
+        for (let i = 0; i < pendingFiles.length; i++) {
+          const file = pendingFiles[i];
+          const item = document.createElement("div");
+          item.className = "file-preview-item";
+          if (IMAGE_TYPES.has(file.type)) {
+            const img = document.createElement("img");
+            img.src = URL.createObjectURL(file);
+            item.append(img);
+          }
+          const name = document.createElement("span");
+          name.className = "file-name";
+          name.textContent = `${file.name} (${formatFileSize(file.size)})`;
+          item.append(name);
+          const removeBtn = document.createElement("button");
+          removeBtn.className = "file-remove";
+          removeBtn.type = "button";
+          removeBtn.textContent = "✕";
+          removeBtn.addEventListener("click", () => removeFile(i));
+          item.append(removeBtn);
+          filePreviewArea.append(item);
+        }
+      }
+
+      async function readFilesAsAttachments() {
+        const attachments = [];
+        for (const file of pendingFiles) {
+          const buffer = await file.arrayBuffer();
+          const base64 = btoa(new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), ""));
+          attachments.push({
+            name: file.name,
+            type: file.type,
+            size: file.size,
+            data: base64,
+          });
+        }
+        pendingFiles = [];
+        renderFilePreview();
+        return attachments;
+      }
+
+      attachFileBtn.addEventListener("click", () => fileInput.click());
+      fileInput.addEventListener("change", () => {
+        if (fileInput.files.length) addFiles(fileInput.files);
+        fileInput.value = "";
+      });
+      input.addEventListener("dragover", (e) => { e.preventDefault(); e.stopPropagation(); });
+      input.addEventListener("drop", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+      });
       const conversationNav = document.querySelector("#conversationNav");
       const memoryLibraryNav = document.querySelector("#memoryLibraryNav");
       const memoryNavLabel = document.querySelector("#memoryNavLabel");
@@ -5298,6 +5485,12 @@
       const actionInput = document.querySelector("#actionInput");
       const actionCancel = document.querySelector("#actionCancel");
       const actionConfirm = document.querySelector("#actionConfirm");
+      // ── 前后端分离配置 ──
+      // API_BASE: 后端 API 地址（默认同源，生产环境改为后端独立地址）
+      const API_BASE = window.SILVER_WOLF_CONFIG?.apiBase ?? "";
+      // FRONTEND_BASE: 前端页面基址（用于跨页面跳转）
+      const FRONTEND_BASE = window.SILVER_WOLF_CONFIG?.frontendBase ?? "";
+
       const ACTIVE_SESSION_KEY = "silver-wolf-active-session";
       const AUTH_TOKEN_KEY = "silver-wolf-auth-token";
       const USER_TOKEN_KEY = "silver-wolf-user-token";
@@ -5380,7 +5573,8 @@
         const headers = new Headers(options.headers);
         if (apiToken) headers.set("Authorization", `Bearer ${apiToken}`);
         if (userToken) headers.set("X-User-Token", userToken);
-        return fetch(resource, { ...options, headers });
+        const url = resource.startsWith("/") ? API_BASE + resource : resource;
+        return fetch(url, { ...options, headers });
       }
 
       function updateUserInfoUI(info) {
@@ -5988,8 +6182,7 @@
         const summary = document.createElement("div");
         summary.className = "workspace-summary-grid";
         appendSummaryCard(summary, "已激活", stats.active || 0);
-        appendSummaryCard(summary, "候选记忆", stats.candidates || 0);
-        appendSummaryCard(summary, "已遗忘", stats.forgotten || 0);
+        appendSummaryCard(summary, "候选中", stats.candidates || 0);
         workspacePanelBody.append(summary);
 
         if (memories.length > 0) {
@@ -6023,7 +6216,6 @@
           const meta = document.createElement("div");
           meta.className = "workspace-list-meta";
           for (const text of [
-            memory.status === "active" ? "已激活" : "候选",
             `证据 ${memory.evidenceCount || 0}`,
             `置信 ${Math.round(Number(memory.confidence || 0) * 100)}%`,
             `更新 ${formatWorkspaceTime(memory.updatedAt)}`,
@@ -6095,6 +6287,12 @@
         showToast(`已清空 ${data.deleted || 0} 条记忆`);
       }
 
+      const SKILL_PROMPTS = {
+        "web-search": "帮我搜索一下：",
+        "weather": "帮我查一下天气：",
+        "technology-news-search": "帮我看看今天的科技新闻",
+      };
+
       function renderSkillsLibrary(data) {
         workspacePanelBody.innerHTML = "";
         workspacePanelActions.textContent = "";
@@ -6102,8 +6300,6 @@
         const summary = document.createElement("div");
         summary.className = "workspace-summary-grid";
         appendSummaryCard(summary, "在线技能", skills.length);
-        appendSummaryCard(summary, "类型", "内置");
-        appendSummaryCard(summary, "状态", "可调用");
         workspacePanelBody.append(summary);
 
         if (!skills.length) {
@@ -6127,14 +6323,24 @@
           description.textContent = skill.description || "暂无描述";
           const meta = document.createElement("div");
           meta.className = "workspace-list-meta";
-          for (const text of [`v${skill.version || "1.0.0"}`, skill.status === "online" ? "在线" : "离线", skill.builtIn ? "内置" : "自定义"]) {
+          for (const text of [`v${skill.version || "1.0.0"}`, skill.status === "online" ? "在线" : "离线"]) {
             const chip = document.createElement("span");
             chip.className = "workspace-chip";
             chip.textContent = text;
             meta.append(chip);
           }
           copy.append(title, description, meta);
-          item.append(copy);
+          const useBtn = document.createElement("button");
+          useBtn.type = "button";
+          useBtn.className = "workspace-secondary-btn";
+          useBtn.textContent = "使用";
+          useBtn.addEventListener("click", () => {
+            const prompt = SKILL_PROMPTS[skill.name] ?? `使用${skill.name}技能：`;
+            closeWorkspacePanelDialog();
+            input.value = prompt;
+            input.focus();
+          });
+          item.append(copy, useBtn);
           list.append(item);
         }
         workspacePanelBody.append(list);
@@ -6374,7 +6580,7 @@
       async function ensureAuthentication() {
         await checkUserAuth();
         if (userInfo) return;
-        location.replace(`/login?next=${encodeURIComponent(location.pathname)}`);
+        location.replace(`${FRONTEND_BASE}/login?next=${encodeURIComponent(location.pathname)}`);
         await new Promise(() => {});
       }
 
@@ -6409,7 +6615,7 @@
 
       function appendInlineMarkdown(container, source) {
         const normalized = source.replace(/\*\*\s*([^*\n]+?)\s*\*\*/g, "**$1**");
-        const tokenPattern = /(\*\*[^*\n]+\*\*|`[^`\n]+`)/g;
+        const tokenPattern = /(\*\*[^*\n]+\*\*|`[^`\n]+`|\[([^\]\n]+)\]\(([^)\n]+)\)|https?:\/\/[^\s)<\]"'`\u00A0]+|www\.[^\s)<\]"'`\u00A0]+)/g;
         let cursor = 0;
         let match;
         while ((match = tokenPattern.exec(normalized))) {
@@ -6423,10 +6629,25 @@
             const strong = document.createElement("strong");
             strong.textContent = token.slice(2, -2).trim();
             container.append(strong);
-          } else {
+          } else if (token.startsWith("`")) {
             const code = document.createElement("code");
             code.textContent = token.slice(1, -1);
             container.append(code);
+          } else if (token.startsWith("[")) {
+            const link = document.createElement("a");
+            link.href = match[3];
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.textContent = match[2];
+            container.append(link);
+          } else if (token.startsWith("http://") || token.startsWith("https://") || token.startsWith("www.")) {
+            const href = token.startsWith("www.") ? `https://${token}` : token;
+            const link = document.createElement("a");
+            link.href = href;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.textContent = token;
+            container.append(link);
           }
           cursor = tokenPattern.lastIndex;
         }
@@ -7132,6 +7353,143 @@
         await refreshSkillsBadge();
       }
 
+      // ── 前端思考过程保底过滤 ──
+      const THINKING_START_PATTERNS = [
+        /^<think/i, /^<reasoning/i, /^<\|thinking/i,
+        /^Thinking\s*(Process)?\s*[:：]/i, /^Thought\s*Process\s*[:：]/i,
+        /^Let me think/i, /^Analyze\s+(the\s+)?Request/i, /^Step\s*\d+/i,
+        /^(Determine|Identify|Consider|Context|Constraints?|Key\s+Point|Background|Solution|Approach|Strategy|Reasoning|Evaluation)\s*[:\-]/i,
+        /^好的[，,]?\s*(用户|玩家|这|首先|根据)/,
+        /^(用户|玩家)(发来|说|的消息|问|想要|又|可能)/,
+        /^我(需要|应该|要|来|先|现在|不能|不|也|得)/,
+        /^(首先|第一步|分析一下|让我想想|让我分析|回顾)/,
+        /^(嗯|呃|让我|那么|实际上|不过)[，,]/,
+        /^根据(规则|之前的|示例|上下文|系统|设定)/,
+        /^(可能|也许|大概)(的)?(回复|回答|方向|思路)/,
+        /^还需要(考虑|注意|检查)/,
+        /^同时[，,]?(规则|注意|需要|保持|用户)/,
+        /^(另外|此外|还有)[，,]/,
+      ];
+
+      const META_REASONING_RE = [
+        /我(需要|应该|要|来|先|现在|不能|不|也|得|可能)/,
+        /(用户|玩家)(可能|接下来|发来|说|的消息|问|想要|的意图|的想法|又|是在|已经)/,
+        /(规则|注意|禁止|避免|不能|不要|必须|应该|不允许)/,
+        /(检查|确认|验证|最后确认|确认一下|自检|自查)/,
+        /(符合|违反|是否|有没有)/,
+        /(之前的例子|示例中|few-?shot|之前的回复)/i,
+        /(另外|此外|还有|同时)/,
+        /保持.*(语气|风格|性格|态度|简短|自然|连贯)/,
+        /(所以正确|没问题|即可|正确|确保)/,
+        /作为银狼.*应该/,
+        /(银狼|角色)的(身份|性格|语气|风格|设定)/,
+        /(客服腔|英文混用|中文标点|禁止词汇)/,
+        /(预测|推测|猜测|判断|分析).*(用户|玩家|意图|想法)/,
+        /(日期是|当前日期|时间背景|2026)/,
+        /(回复方向|回复内容|可能的回复|思路|方向)/,
+        /(需要换|需要保持|需要确保|需要考虑|需要注意|需要检查)/,
+        /(第一次|第二次|第三次|上一轮|上一次|之前|此前)/,
+        /(问候语|开场白|打招呼)/,
+        /^(Thinking|Thought|Analyze|Analysis|Determine|Identify|Consider|Context|Constraints?|Key\s+Point|Background|Roleplay|Perspective|Step|Solution|Approach|Strategy|Reasoning|Evaluation|Assessment|Intent|Goal|Objective|Silver\s+Wolf|She|Better|Date)\b/i,
+        /\b(user|users|player)\b.*\b(ask|asks|asked|want|wants|needs?|intent|question|request)/i,
+        /\b(I|we)\b.*\b(need to|should|must|have to|will|am going to|would|could)/i,
+        /\b(roleplay|role-playing|in character|out of character|stay in character)\b/i,
+        /\b(constraint|rule|instruction|guideline|system prompt)\b/i,
+        /\b(personality|tone|style|casual|tsundere|gamer slang)\b/i,
+        /\b(memory|long.?term|session|data|storage|cache|log)\b/i,
+        /\b(avoid|don't|do not|must not|should not|cannot)\b/i,
+        /\b(customer service|formal|polite|generic)\b/i,
+        /\b(however|therefore|thus|so|because|since|although|while|whereas)\b.*\b(user|player|response|reply|answer)/i,
+        /\b(better|alternative|option|approach)\b.*\b(response|reply|answer|message)/i,
+        /\b(silver wolf|honkai|star rail)\b/i,
+        /\b(she|her)\b.*\b(would|might|could|should|needs? to|won't)\b/i,
+        /\b(dry technical|deflect|downplay|worldview|data persistence|hacker persona)\b/i,
+        /\b(breaking character|admit|AI with)\b/i,
+        /\b(2026)\b/i,
+      ];
+
+      function feStartsWithThinking(text) {
+        const t = text.trimStart();
+        for (const p of THINKING_START_PATTERNS) { if (p.test(t)) return true; }
+        return false;
+      }
+
+      function feContainsMetaReasoning(paragraph) {
+        return META_REASONING_RE.some((p) => p.test(paragraph));
+      }
+
+      function feExtractQuotedDialog(text) {
+        const patterns = [
+          /\u201C([^\u201D\n]{4,})\u201D/g,
+          /[\u300C\u300E]([^\u300D\u300F\n]{4,})[\u300D\u300F]/g,
+          /"([^"\n]{4,})"/g,
+        ];
+        const matches = [];
+        for (const p of patterns) {
+          let m;
+          while ((m = p.exec(text)) !== null) {
+            const c = m[1].trim();
+            if (c.length < 4 || c.length > 200) continue;
+            if (/(规则|禁止|注意|不能|必须|应该|客服腔|英文混用|禁止词汇)/.test(c)) continue;
+            if (/^(根据|用户|玩家|规则|首先|另外|此外|还需要|同时|可能|也许|如果|因为|所以|但是|不过|比如|例如|第一次|第二次|第三次|上一轮|上一次|之前|此前|回顾|检查|确认|保持|避免|作为)/.test(c)) continue;
+            if (/(回复方向|回复内容|可能的回复|思路|分析用户|判断用户|推测用户|意图|需要换|需要保持|需要确保|需要考虑|需要注意|需要检查|保持.*语气|保持.*风格|保持.*简短|保持.*自然)/.test(c)) continue;
+            matches.push(c);
+          }
+        }
+        if (matches.length === 0) return null;
+        return matches[matches.length - 1];
+      }
+
+      function feStripThinkingContent(text) {
+        let r = text;
+        r = r.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, "");
+        r = r.replace(/<think(?:ing)?>\s*[\s\S]*$/gi, "");
+        r = r.replace(/<reasoning>[\s\S]*?<\/reasoning>/gi, "");
+        r = r.replace(/<\|thinking\|>[\s\S]*?<\|\/thinking\|>/gi, "");
+        r = r.trim();
+        if (!r) return r;
+
+        if (!feStartsWithThinking(r)) {
+          const paras = r.split(/\n{2,}/);
+          if (paras.length < 3) {
+            return r.replace(/<\/?(?:think|reasoning|thinking)[^>]*>/gi, "")
+              .replace(/<\|\/?thinking\|>/gi, "").trim();
+          }
+        }
+
+        const paras = r.split(/\n{2,}/);
+        if (paras.length >= 2) {
+          const halfEnd = Math.min(paras.length, Math.ceil(paras.length / 2));
+          let mc = 0;
+          for (let i = 0; i < halfEnd; i++) { if (feContainsMetaReasoning(paras[i])) mc++; }
+          if (mc >= Math.ceil(halfEnd / 2) || feStartsWithThinking(r)) {
+            let startIdx = -1;
+            for (let i = paras.length - 1; i >= 0; i--) {
+              const para = paras[i].trim();
+              if (!para) continue;
+              if (!feContainsMetaReasoning(para) && !feStartsWithThinking(para)) {
+                startIdx = i;
+              } else {
+                if (startIdx !== -1) break;
+              }
+            }
+            if (startIdx !== -1) {
+              const filtered = paras.slice(startIdx).join("\n\n").trim();
+              if (filtered) r = filtered;
+            } else {
+              const extracted = feExtractQuotedDialog(r);
+              if (extracted) r = extracted;
+            }
+          }
+        }
+
+        r = r.replace(/<\/?(?:think|reasoning|thinking)[^>]*>/gi, "")
+          .replace(/<\|\/?thinking\|>/gi, "")
+          .replace(/^(Response|Output|Answer|Final\s+(?:Answer|Response)|My\s+(?:response|answer|reply)|回复|回答|输出)\s*[:：]\s*/i, "")
+          .trim();
+        return r;
+      }
+
       function parseSSE(buffer) {
         const events = [];
         const parts = buffer.split("\n\n");
@@ -7171,7 +7529,8 @@
           }
           if (payload.type === "delta") {
             assistant.rawText += payload.content;
-            renderAssistantMarkdown(assistant.content, assistant.rawText);
+            const filtered = feStripThinkingContent(assistant.rawText);
+            renderAssistantMarkdown(assistant.content, filtered);
           } else if (payload.type === "step") {
             appendProcess(assistant.process, `[${payload.name}] ${payload.content}`);
           } else if (payload.type === "source") {
@@ -7181,7 +7540,7 @@
             errorMessage ||= payload.content;
           } else if (payload.type === "done") {
             completed = true;
-            assistant.rawText = payload.content.reply;
+            assistant.rawText = feStripThinkingContent(payload.content.reply);
             renderAssistantMarkdown(assistant.content, assistant.rawText);
             appendProcess(assistant.process, "[done] 回复完成");
             await refreshSessions();
@@ -7221,10 +7580,11 @@
         activeRequest = { requestId, controller };
 
         try {
+          const attachments = await readFilesAsAttachments();
           const response = await apiFetch("/chat/stream", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ message, sessionId, requestId }),
+            body: JSON.stringify({ message, sessionId, requestId, attachments }),
             signal: controller.signal,
           });
 

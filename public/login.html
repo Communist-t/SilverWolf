@@ -8,6 +8,7 @@
       content="登录 Silver Wolf AI Agent System，连接你的智能伙伴。"
     />
     <title>登录 | Silver Wolf AI Agent System</title>
+    <script src="/config.js"></script>
     <link rel="stylesheet" href="/vendor/phosphor/style.css" />
     <style>
       :root {
@@ -136,6 +137,48 @@
         height: 7px;
         margin-left: 3px;
         background: rgba(112, 71, 246, 0.22);
+      }
+
+      .theme-toggle-btn {
+        position: absolute;
+        z-index: 5;
+        top: 30px;
+        right: 36px;
+        width: 36px;
+        height: 36px;
+        padding: 0;
+        border: 1px solid var(--line);
+        border-radius: 50%;
+        color: var(--muted);
+        background: var(--surface);
+        cursor: pointer;
+        font-size: 16px;
+        backdrop-filter: blur(12px);
+        transition: border-color 150ms ease, color 150ms ease, background 150ms ease, transform 150ms ease;
+      }
+
+      .theme-toggle-btn:hover {
+        border-color: var(--purple);
+        color: var(--purple);
+        transform: scale(1.08);
+      }
+
+      html[data-theme="dark"] .theme-toggle-btn {
+        color: #bbaaff;
+        border-color: rgba(120, 100, 200, 0.25);
+        background: rgba(35, 33, 48, 0.8);
+      }
+
+      html[data-theme="dark"] .theme-toggle-btn:hover {
+        border-color: var(--purple);
+        color: var(--purple-deep);
+      }
+
+      @media (max-width: 840px) {
+        .theme-toggle-btn {
+          right: 22px;
+          top: 24px;
+        }
       }
 
       .content-grid {
@@ -267,7 +310,7 @@
       }
 
       .mode-tabs {
-        display: none;
+        display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 5px;
         margin-bottom: 16px;
@@ -548,6 +591,30 @@
         content: none;
       }
 
+      .character-figure {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+        padding: 80px 20px 40px;
+        pointer-events: none;
+      }
+
+      .character-figure img {
+        width: min(100%, 340px);
+        height: auto;
+        max-height: 100%;
+        object-fit: contain;
+        object-position: center bottom;
+        filter: drop-shadow(0 20px 40px rgba(63, 54, 110, 0.18));
+        transition: filter 200ms ease;
+      }
+
+      html[data-theme="dark"] .character-figure img {
+        filter: drop-shadow(0 20px 48px rgba(80, 60, 200, 0.28)) brightness(0.92);
+      }
+
       .diagnostics {
         position: absolute;
         z-index: 1;
@@ -747,11 +814,11 @@
       }
 
       html[data-theme="dark"] body {
-        background: #111218;
+        background: #111218 url("/assets/silver-wolf-login-scene.jpg") center / cover fixed;
       }
 
       html[data-theme="dark"] .login-shell::before {
-        background: rgba(0, 0, 0, 0.3);
+        background: rgba(0, 0, 0, 0.5);
       }
 
       html[data-theme="dark"] .brand-lockup {
@@ -877,18 +944,11 @@
   </head>
   <body>
     <main class="login-shell">
-      <a class="brand-lockup" href="/" aria-label="返回 Silver Wolf 首页">
-        <img src="/assets/silver-wolf-logo-trimmed.png" alt="" />
-        <span class="brand-copy">
-          <span class="brand-name">SILVER WOLF</span>
-          <span class="brand-subtitle">AGENT SYSTEM</span>
-        </span>
-      </a>
-
       <div class="security-label" aria-hidden="true">
         // SECURE ACCESS PROTOCOL
         <span></span><span></span><span></span><span></span>
       </div>
+      <button id="loginThemeToggle" class="theme-toggle-btn" type="button" aria-label="切换深色模式">◐</button>
 
       <div class="content-grid">
         <section class="login-column" aria-labelledby="pageTitle">
@@ -1005,6 +1065,10 @@
     </main>
 
     <script>
+      // ── 前后端分离配置 ──
+      const API_BASE = window.SILVER_WOLF_CONFIG?.apiBase ?? "";
+      const FRONTEND_BASE = window.SILVER_WOLF_CONFIG?.frontendBase ?? "";
+
       const USER_TOKEN_KEY = "silver-wolf-user-token";
       const USER_INFO_KEY = "silver-wolf-user-info";
       const REMEMBERED_ACCOUNT_KEY = "silver-wolf-remembered-account";
@@ -1040,8 +1104,8 @@
 
       const nextParam = new URLSearchParams(location.search).get("next");
       const nextUrl = nextParam && nextParam.startsWith("/") && !nextParam.startsWith("//")
-        ? nextParam
-        : "/chat";
+        ? `${FRONTEND_BASE}${nextParam}`
+        : `${FRONTEND_BASE}/chat`;
 
       function showMessage(message, kind = "error") {
         formMessage.textContent = message;
@@ -1104,7 +1168,7 @@
             const password = loginPassword.value;
             if (!account || !password) throw new Error("请输入账号和密码");
 
-            const data = await parseResponse(await fetch("/auth/login", {
+            const data = await parseResponse(await fetch(`${API_BASE}/auth/login`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ account, password }),
@@ -1123,7 +1187,7 @@
             if (password.length < 6) throw new Error("密码至少需要 6 位");
             if (password !== confirmation) throw new Error("两次密码输入不一致");
 
-            const data = await parseResponse(await fetch("/auth/register", {
+            const data = await parseResponse(await fetch(`${API_BASE}/auth/register`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ email, code, password, confirmPassword: confirmation }),
@@ -1151,7 +1215,7 @@
         sendCodeButton.disabled = true;
         showMessage("");
         try {
-          await parseResponse(await fetch("/auth/send-code", {
+          await parseResponse(await fetch(`${API_BASE}/auth/send-code`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ email }),
@@ -1215,6 +1279,23 @@
           if (e.key === key) document.documentElement.dataset.theme = e.newValue || "light";
         });
       })();
+
+      // 主题切换按钮
+      const themeToggleBtn = document.querySelector("#loginThemeToggle");
+      if (themeToggleBtn) {
+        const updateBtnLabel = () => {
+          const dark = document.documentElement.dataset.theme === "dark";
+          themeToggleBtn.textContent = dark ? "☼" : "◐";
+          themeToggleBtn.setAttribute("aria-label", dark ? "切换浅色模式" : "切换深色模式");
+        };
+        updateBtnLabel();
+        themeToggleBtn.addEventListener("click", () => {
+          const next = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+          document.documentElement.dataset.theme = next;
+          localStorage.setItem("silver-wolf-theme", next);
+          updateBtnLabel();
+        });
+      }
     </script>
   </body>
 </html>

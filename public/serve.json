@@ -1,0 +1,13 @@
+{
+  "redirects": [
+    { "source": "/", "destination": "/landing", "type": 302 }
+  ],
+  "rewrites": [
+    { "source": "/chat", "destination": "/index.html" },
+    { "source": "/chat/", "destination": "/index.html" },
+    { "source": "/login", "destination": "/login.html" },
+    { "source": "/login/", "destination": "/login.html" },
+    { "source": "/landing", "destination": "/landing.html" },
+    { "source": "/landing/", "destination": "/landing.html" }
+  ]
+}

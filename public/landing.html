@@ -8,6 +8,7 @@
       content="Silver Wolf AI Agent System，具备自然语言交互、联网检索、连续记忆与安全数据管理能力。"
     />
     <title>Silver Wolf AI Agent System</title>
+    <script src="/config.js"></script>
     <style>
       :root {
         color-scheme: light;
@@ -1927,6 +1928,16 @@
     </div>
 
     <script>
+      // ── 前后端分离配置 ──
+      const FRONTEND_BASE = window.SILVER_WOLF_CONFIG?.frontendBase ?? "";
+      // 自动给页面内的绝对路径链接加上 FRONTEND_BASE 前缀
+      document.querySelectorAll('a[href^="/"]').forEach((a) => {
+        const href = a.getAttribute("href");
+        if (href && !href.startsWith("//")) {
+          a.setAttribute("href", `${FRONTEND_BASE}${href}`);
+        }
+      });
+
       const header = document.querySelector("#siteHeader");
       const menuToggle = document.querySelector("#menuToggle");
       const navigation = document.querySelector("#siteNav");
