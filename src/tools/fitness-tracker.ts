@@ -10,8 +10,7 @@
  *   - 脂肪供能 35% ：必需脂肪酸，维持激素水平
  */
 
-import { db } from "../db/conversation-store.js";
-import { logger } from "../logger.js";
+import { pool } from "../db/pool.js";
 
 // ── 类型定义 ───────────────────────────────────────────────────
 
@@ -108,7 +107,6 @@ const PROTEIN_RATIO = 0.30;
 const CARBS_RATIO = 0.35;
 const FAT_RATIO = 0.35;
 
-/** 活动系数（Mifflin-St Jeor × 系数） */
 const ACTIVITY_MULTIPLIER: Record<ActivityLevel, number> = {
   sedentary: 1.2,
   light: 1.375,
@@ -119,12 +117,6 @@ const ACTIVITY_MULTIPLIER: Record<ActivityLevel, number> = {
 
 // ── BMR 计算 ───────────────────────────────────────────────────
 
-/**
- * Mifflin-St Jeor 基础代谢率公式
- *
- * 男性：10 × 体重(kg) + 6.25 × 身高(cm) - 5 × 年龄 + 5
- * 女性：10 × 体重(kg) + 6.25 × 身高(cm) - 5 × 年龄 - 161
- */
 export function calculateBmr(
   weightKg: number,
   heightCm: number,
@@ -135,9 +127,6 @@ export function calculateBmr(
   return Math.round(gender === "male" ? base + 5 : base - 161);
 }
 
-/**
- * 根据 BMR 和活动系数计算维持热量
- */
 export function calculateMaintenanceCalories(
   bmr: number,
   activityLevel: ActivityLevel
@@ -145,9 +134,6 @@ export function calculateMaintenanceCalories(
   return Math.round(bmr * ACTIVITY_MULTIPLIER[activityLevel]);
 }
 
-/**
- * 根据目标热量计算 30/35/35 宏量营养素配比
- */
 export function calculateMacroSplit(totalCalories: number): MacroSplit {
   const proteinCal = Math.round(totalCalories * PROTEIN_RATIO);
   const carbsCal = Math.round(totalCalories * CARBS_RATIO);
@@ -164,16 +150,6 @@ export function calculateMacroSplit(totalCalories: number): MacroSplit {
   };
 }
 
-/**
- * 一键生成减脂方案：BMR → 热量目标 → 宏量营养素
- *
- * @param weightKg 体重 (kg)
- * @param heightCm 身高 (cm)
- * @param age 年龄
- * @param gender 性别
- * @param activityLevel 活动水平
- * @param deficitCal 热量缺口（默认 300，减脂期常用 200-500）
- */
 export function generateFatLossPlan(
   weightKg: number,
   heightCm: number,
@@ -189,7 +165,6 @@ export function generateFatLossPlan(
 } {
   const bmr = calculateBmr(weightKg, heightCm, age, gender);
   const maintenanceCalories = calculateMaintenanceCalories(bmr, activityLevel);
-  // 减脂踩 BMR 线吃，不叠加活动消耗
   const targetCalories = bmr;
   const macros = calculateMacroSplit(targetCalories);
 
@@ -208,31 +183,28 @@ function todayDate(): string {
 
 // ── 用户配置 ───────────────────────────────────────────────────
 
-export function getFitnessProfile(ownerId: string): FitnessProfile | null {
-  const row = db
-    .prepare("SELECT * FROM fitness_profile WHERE owner_id = ?")
-    .get(ownerId) as Record<string, unknown> | undefined;
-
-  if (!row) return null;
-
+export async function getFitnessProfile(ownerId: string): Promise<FitnessProfile | null> {
+  const result = await pool.query("SELECT * FROM fitness_profile WHERE owner_id = $1", [ownerId]);
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0];
   return {
-    ownerId: row.owner_id as string,
-    bmr: row.bmr as number,
-    calorieTarget: row.calorie_target as number,
-    proteinTargetG: row.protein_target_g as number,
-    carbsTargetG: row.carbs_target_g as number,
-    fatTargetG: row.fat_target_g as number,
-    weightKg: row.weight_kg as number | undefined,
-    heightCm: row.height_cm as number | undefined,
-    age: row.age as number | undefined,
-    gender: row.gender as FitnessGender | undefined,
-    activityLevel: row.activity_level as ActivityLevel,
-    createdAt: row.created_at as string,
-    updatedAt: row.updated_at as string,
+    ownerId: row.owner_id,
+    bmr: Number(row.bmr),
+    calorieTarget: Number(row.calorie_target),
+    proteinTargetG: Number(row.protein_target_g),
+    carbsTargetG: Number(row.carbs_target_g),
+    fatTargetG: Number(row.fat_target_g),
+    weightKg: row.weight_kg != null ? Number(row.weight_kg) : undefined,
+    heightCm: row.height_cm != null ? Number(row.height_cm) : undefined,
+    age: row.age != null ? Number(row.age) : undefined,
+    gender: row.gender ?? undefined,
+    activityLevel: row.activity_level,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
-export function upsertFitnessProfile(
+export async function upsertFitnessProfile(
   ownerId: string,
   data: {
     weightKg?: number;
@@ -242,8 +214,8 @@ export function upsertFitnessProfile(
     activityLevel?: ActivityLevel;
     calorieTarget?: number;
   }
-): FitnessProfile {
-  const existing = getFitnessProfile(ownerId);
+): Promise<FitnessProfile> {
+  const existing = await getFitnessProfile(ownerId);
   const timestamp = now();
 
   const weightKg = data.weightKg ?? existing?.weightKg;
@@ -252,7 +224,6 @@ export function upsertFitnessProfile(
   const gender = data.gender ?? existing?.gender;
   const activityLevel = data.activityLevel ?? existing?.activityLevel ?? "sedentary";
 
-  // 有足够数据时自动计算 BMR 和热量目标
   let bmr = existing?.bmr ?? 0;
   let calorieTarget = data.calorieTarget ?? existing?.calorieTarget ?? 0;
 
@@ -265,40 +236,41 @@ export function upsertFitnessProfile(
 
   const macros = calculateMacroSplit(calorieTarget);
 
-  db.prepare(
+  await pool.query(
     `
     INSERT INTO fitness_profile (
       owner_id, bmr, calorie_target,
       protein_target_g, carbs_target_g, fat_target_g,
       weight_kg, height_cm, age, gender, activity_level,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
     ON CONFLICT(owner_id) DO UPDATE SET
-      bmr = excluded.bmr,
-      calorie_target = excluded.calorie_target,
-      protein_target_g = excluded.protein_target_g,
-      carbs_target_g = excluded.carbs_target_g,
-      fat_target_g = excluded.fat_target_g,
-      weight_kg = excluded.weight_kg,
-      height_cm = excluded.height_cm,
-      age = excluded.age,
-      gender = excluded.gender,
-      activity_level = excluded.activity_level,
-      updated_at = excluded.updated_at
-    `
-  ).run(
-    ownerId, bmr, calorieTarget,
-    macros.proteinG, macros.carbsG, macros.fatG,
-    weightKg ?? null, heightCm ?? null, age ?? null, gender ?? null, activityLevel,
-    timestamp, timestamp
+      bmr = EXCLUDED.bmr,
+      calorie_target = EXCLUDED.calorie_target,
+      protein_target_g = EXCLUDED.protein_target_g,
+      carbs_target_g = EXCLUDED.carbs_target_g,
+      fat_target_g = EXCLUDED.fat_target_g,
+      weight_kg = EXCLUDED.weight_kg,
+      height_cm = EXCLUDED.height_cm,
+      age = EXCLUDED.age,
+      gender = EXCLUDED.gender,
+      activity_level = EXCLUDED.activity_level,
+      updated_at = EXCLUDED.updated_at
+    `,
+    [
+      ownerId, bmr, calorieTarget,
+      macros.proteinG, macros.carbsG, macros.fatG,
+      weightKg ?? null, heightCm ?? null, age ?? null, gender ?? null, activityLevel,
+      timestamp, timestamp
+    ]
   );
 
-  return getFitnessProfile(ownerId)!;
+  return (await getFitnessProfile(ownerId))!;
 }
 
 // ── 日常饮食记录 ───────────────────────────────────────────────
 
-export function addMeal(
+export async function addMeal(
   ownerId: string,
   date: string,
   mealType: MealType,
@@ -307,20 +279,21 @@ export function addMeal(
   proteinG = 0,
   carbsG = 0,
   fatG = 0
-): FitnessMeal {
+): Promise<FitnessMeal> {
   const timestamp = now();
-  const result = db.prepare(
+  const result = await pool.query<{ id: number }>(
     `
     INSERT INTO fitness_meals (owner_id, date, meal_type, food_name, calories, protein_g, carbs_g, fat_g, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `
-  ).run(ownerId, date, mealType, foodName, calories, proteinG, carbsG, fatG, timestamp);
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    RETURNING id
+    `,
+    [ownerId, date, mealType, foodName, calories, proteinG, carbsG, fatG, timestamp]
+  );
 
-  // 同步更新当日汇总
-  syncDailyLog(ownerId, date);
+  await syncDailyLog(ownerId, date);
 
   return {
-    id: result.lastInsertRowid as number,
+    id: result.rows[0].id,
     ownerId,
     date,
     mealType,
@@ -333,47 +306,48 @@ export function addMeal(
   };
 }
 
-export function getMeals(ownerId: string, date: string): FitnessMeal[] {
-  const rows = db
-    .prepare(
-      "SELECT * FROM fitness_meals WHERE owner_id = ? AND date = ? ORDER BY created_at ASC"
-    )
-    .all(ownerId, date) as Array<Record<string, unknown>>;
-
-  return rows.map(mapMealRow);
+export async function getMeals(ownerId: string, date: string): Promise<FitnessMeal[]> {
+  const result = await pool.query(
+    "SELECT * FROM fitness_meals WHERE owner_id = $1 AND date = $2 ORDER BY created_at ASC",
+    [ownerId, date]
+  );
+  return result.rows.map(mapMealRow);
 }
 
-export function deleteMeal(mealId: number, ownerId: string): boolean {
-  const meal = db
-    .prepare("SELECT owner_id, date FROM fitness_meals WHERE id = ?")
-    .get(mealId) as { owner_id: string; date: string } | undefined;
-  if (!meal || meal.owner_id !== ownerId) return false;
+export async function deleteMeal(mealId: number, ownerId: string): Promise<boolean> {
+  const result = await pool.query(
+    "SELECT owner_id, date FROM fitness_meals WHERE id = $1",
+    [mealId]
+  );
+  if (result.rows.length === 0 || result.rows[0].owner_id !== ownerId) return false;
 
-  db.prepare("DELETE FROM fitness_meals WHERE id = ?").run(mealId);
-  syncDailyLog(ownerId, meal.date);
+  await pool.query("DELETE FROM fitness_meals WHERE id = $1", [mealId]);
+  await syncDailyLog(ownerId, result.rows[0].date);
   return true;
 }
 
 // ── 运动记录 ───────────────────────────────────────────────────
 
-export function addWorkout(
+export async function addWorkout(
   ownerId: string,
   date: string,
   type: WorkoutType,
   durationMinutes: number,
   details = "",
   intensity: Intensity = "moderate"
-): FitnessWorkout {
+): Promise<FitnessWorkout> {
   const timestamp = now();
-  const result = db.prepare(
+  const result = await pool.query<{ id: number }>(
     `
     INSERT INTO fitness_workouts (owner_id, date, type, duration_minutes, details, intensity, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    `
-  ).run(ownerId, date, type, durationMinutes, details, intensity, timestamp);
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    RETURNING id
+    `,
+    [ownerId, date, type, durationMinutes, details, intensity, timestamp]
+  );
 
   return {
-    id: result.lastInsertRowid as number,
+    id: result.rows[0].id,
     ownerId,
     date,
     type,
@@ -384,150 +358,153 @@ export function addWorkout(
   };
 }
 
-export function getWorkouts(ownerId: string, date: string): FitnessWorkout[] {
-  const rows = db
-    .prepare(
-      "SELECT * FROM fitness_workouts WHERE owner_id = ? AND date = ? ORDER BY created_at ASC"
-    )
-    .all(ownerId, date) as Array<Record<string, unknown>>;
-
-  return rows.map(mapWorkoutRow);
+export async function getWorkouts(ownerId: string, date: string): Promise<FitnessWorkout[]> {
+  const result = await pool.query(
+    "SELECT * FROM fitness_workouts WHERE owner_id = $1 AND date = $2 ORDER BY created_at ASC",
+    [ownerId, date]
+  );
+  return result.rows.map(mapWorkoutRow);
 }
 
-export function deleteWorkout(workoutId: number, ownerId: string): boolean {
-  const row = db
-    .prepare("SELECT owner_id FROM fitness_workouts WHERE id = ?")
-    .get(workoutId) as { owner_id: string } | undefined;
-  if (!row || row.owner_id !== ownerId) return false;
+export async function deleteWorkout(workoutId: number, ownerId: string): Promise<boolean> {
+  const result = await pool.query(
+    "SELECT owner_id FROM fitness_workouts WHERE id = $1",
+    [workoutId]
+  );
+  if (result.rows.length === 0 || result.rows[0].owner_id !== ownerId) return false;
 
-  db.prepare("DELETE FROM fitness_workouts WHERE id = ?").run(workoutId);
+  await pool.query("DELETE FROM fitness_workouts WHERE id = $1", [workoutId]);
   return true;
 }
 
 // ── 水分与睡眠 ─────────────────────────────────────────────────
 
-export function updateHydration(
+export async function updateHydration(
   ownerId: string,
   date: string,
   waterMl: number
-): FitnessDailyLog {
-  db.prepare(
+): Promise<FitnessDailyLog> {
+  await pool.query(
     `
     INSERT INTO fitness_daily (owner_id, date, water_ml, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?)
+    VALUES ($1, $2, $3, $4, $5)
     ON CONFLICT(owner_id, date) DO UPDATE SET
-      water_ml = excluded.water_ml,
-      updated_at = excluded.updated_at
-    `
-  ).run(ownerId, date, waterMl, now(), now());
+      water_ml = EXCLUDED.water_ml,
+      updated_at = EXCLUDED.updated_at
+    `,
+    [ownerId, date, waterMl, now(), now()]
+  );
 
-  return getDailyLog(ownerId, date)!;
+  return (await getDailyLog(ownerId, date))!;
 }
 
-export function updateSleep(
+export async function updateSleep(
   ownerId: string,
   date: string,
   sleepHours: number
-): FitnessDailyLog {
-  db.prepare(
+): Promise<FitnessDailyLog> {
+  await pool.query(
     `
     INSERT INTO fitness_daily (owner_id, date, sleep_hours, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?)
+    VALUES ($1, $2, $3, $4, $5)
     ON CONFLICT(owner_id, date) DO UPDATE SET
-      sleep_hours = excluded.sleep_hours,
-      updated_at = excluded.updated_at
-    `
-  ).run(ownerId, date, sleepHours, now(), now());
+      sleep_hours = EXCLUDED.sleep_hours,
+      updated_at = EXCLUDED.updated_at
+    `,
+    [ownerId, date, sleepHours, now(), now()]
+  );
 
-  return getDailyLog(ownerId, date)!;
+  return (await getDailyLog(ownerId, date))!;
 }
 
 // ── 每日日志 ───────────────────────────────────────────────────
 
-export function getDailyLog(ownerId: string, date: string): FitnessDailyLog | null {
-  const row = db
-    .prepare("SELECT * FROM fitness_daily WHERE owner_id = ? AND date = ?")
-    .get(ownerId, date) as Record<string, unknown> | undefined;
-
-  if (!row) return null;
-
+export async function getDailyLog(ownerId: string, date: string): Promise<FitnessDailyLog | null> {
+  const result = await pool.query(
+    "SELECT * FROM fitness_daily WHERE owner_id = $1 AND date = $2",
+    [ownerId, date]
+  );
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0];
   return {
-    id: row.id as number,
-    ownerId: row.owner_id as string,
-    date: row.date as string,
-    calories: row.calories as number,
-    proteinG: row.protein_g as number,
-    carbsG: row.carbs_g as number,
-    fatG: row.fat_g as number,
-    waterMl: row.water_ml as number,
-    sleepHours: row.sleep_hours as number,
-    notes: row.notes as string,
-    createdAt: row.created_at as string,
-    updatedAt: row.updated_at as string,
+    id: row.id,
+    ownerId: row.owner_id,
+    date: row.date,
+    calories: Number(row.calories),
+    proteinG: Number(row.protein_g),
+    carbsG: Number(row.carbs_g),
+    fatG: Number(row.fat_g),
+    waterMl: Number(row.water_ml),
+    sleepHours: Number(row.sleep_hours),
+    notes: row.notes ?? "",
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
-function syncDailyLog(ownerId: string, date: string): void {
-  // 从 meals 表汇总当日营养数据
-  const totals = db
-    .prepare(
-      `
+async function syncDailyLog(ownerId: string, date: string): Promise<void> {
+  const totalsResult = await pool.query<{
+    total_calories: number;
+    total_protein: number;
+    total_carbs: number;
+    total_fat: number;
+  }>(
+    `
       SELECT
         COALESCE(SUM(calories), 0) AS total_calories,
         COALESCE(SUM(protein_g), 0) AS total_protein,
         COALESCE(SUM(carbs_g), 0) AS total_carbs,
         COALESCE(SUM(fat_g), 0) AS total_fat
       FROM fitness_meals
-      WHERE owner_id = ? AND date = ?
-      `
-    )
-    .get(ownerId, date) as {
-      total_calories: number;
-      total_protein: number;
-      total_carbs: number;
-      total_fat: number;
-    };
+      WHERE owner_id = $1 AND date = $2
+    `,
+    [ownerId, date]
+  );
+  const totals = totalsResult.rows[0];
 
-  const existing = db
-    .prepare("SELECT id, water_ml, sleep_hours, notes FROM fitness_daily WHERE owner_id = ? AND date = ?")
-    .get(ownerId, date) as { id: number; water_ml: number; sleep_hours: number; notes: string } | undefined;
+  const existingResult = await pool.query<{ id: number; water_ml: number; sleep_hours: number; notes: string }>(
+    "SELECT id, water_ml, sleep_hours, notes FROM fitness_daily WHERE owner_id = $1 AND date = $2",
+    [ownerId, date]
+  );
+  const existing = existingResult.rows[0];
 
   const waterMl = existing?.water_ml ?? 0;
   const sleepHours = existing?.sleep_hours ?? 0;
   const notes = existing?.notes ?? "";
 
-  db.prepare(
+  await pool.query(
     `
     INSERT INTO fitness_daily (owner_id, date, calories, protein_g, carbs_g, fat_g, water_ml, sleep_hours, notes, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
     ON CONFLICT(owner_id, date) DO UPDATE SET
-      calories = excluded.calories,
-      protein_g = excluded.protein_g,
-      carbs_g = excluded.carbs_g,
-      fat_g = excluded.fat_g,
-      water_ml = COALESCE(excluded.water_ml, fitness_daily.water_ml),
-      sleep_hours = COALESCE(excluded.sleep_hours, fitness_daily.sleep_hours),
-      notes = COALESCE(excluded.notes, fitness_daily.notes),
-      updated_at = excluded.updated_at
-    `
-  ).run(
-    ownerId, date,
-    totals.total_calories, totals.total_protein, totals.total_carbs, totals.total_fat,
-    waterMl, sleepHours, notes,
-    now(), now()
+      calories = EXCLUDED.calories,
+      protein_g = EXCLUDED.protein_g,
+      carbs_g = EXCLUDED.carbs_g,
+      fat_g = EXCLUDED.fat_g,
+      water_ml = COALESCE(EXCLUDED.water_ml, fitness_daily.water_ml),
+      sleep_hours = COALESCE(EXCLUDED.sleep_hours, fitness_daily.sleep_hours),
+      notes = COALESCE(EXCLUDED.notes, fitness_daily.notes),
+      updated_at = EXCLUDED.updated_at
+    `,
+    [
+      ownerId, date,
+      totals.total_calories, totals.total_protein, totals.total_carbs, totals.total_fat,
+      waterMl, sleepHours, notes,
+      now(), now()
+    ]
   );
 }
 
 // ── 每日简报 ───────────────────────────────────────────────────
 
-export function getDailySummary(
+export async function getDailySummary(
   ownerId: string,
   date: string
-): DailySummary | null {
-  const log = getDailyLog(ownerId, date);
-  const meals = getMeals(ownerId, date);
-  const workouts = getWorkouts(ownerId, date);
-  const profile = getFitnessProfile(ownerId);
+): Promise<DailySummary | null> {
+  const log = await getDailyLog(ownerId, date);
+  const meals = await getMeals(ownerId, date);
+  const workouts = await getWorkouts(ownerId, date);
+  const profile = await getFitnessProfile(ownerId);
 
   if (!log && meals.length === 0 && workouts.length === 0) return null;
 
@@ -560,7 +537,7 @@ export function getDailySummary(
 
 // ── 近7日趋势 ───────────────────────────────────────────────────
 
-export function getWeeklyTrend(ownerId: string): Array<{
+export async function getWeeklyTrend(ownerId: string): Promise<Array<{
   date: string;
   calories: number;
   proteinG: number;
@@ -570,94 +547,87 @@ export function getWeeklyTrend(ownerId: string): Array<{
   sleepHours: number;
   workoutCount: number;
   totalWorkoutMinutes: number;
-}> {
+}>> {
   const weekAgo = new Date();
   weekAgo.setDate(weekAgo.getDate() - 6);
   const startDate = weekAgo.toISOString().slice(0, 10);
   const endDate = todayDate();
 
-  const dailyRows = db
-    .prepare(
-      `
-      SELECT * FROM fitness_daily
-      WHERE owner_id = ? AND date >= ? AND date <= ?
-      ORDER BY date ASC
-      `
-    )
-    .all(ownerId, startDate, endDate) as Array<Record<string, unknown>>;
+  const dailyResult = await pool.query(
+    `
+    SELECT * FROM fitness_daily
+    WHERE owner_id = $1 AND date >= $2 AND date <= $3
+    ORDER BY date ASC
+    `,
+    [ownerId, startDate, endDate]
+  );
 
-  // 获取每日运动汇总
-  const workoutSummary = db
-    .prepare(
-      `
-      SELECT date, COUNT(*) AS count, COALESCE(SUM(duration_minutes), 0) AS total_minutes
-      FROM fitness_workouts
-      WHERE owner_id = ? AND date >= ? AND date <= ?
-      GROUP BY date
-      `
-    )
-    .all(ownerId, startDate, endDate) as Array<{ date: string; count: number; total_minutes: number }>;
+  const workoutSummaryResult = await pool.query<{ date: string; count: number; total_minutes: number }>(
+    `
+    SELECT date, COUNT(*) AS count, COALESCE(SUM(duration_minutes), 0) AS total_minutes
+    FROM fitness_workouts
+    WHERE owner_id = $1 AND date >= $2 AND date <= $3
+    GROUP BY date
+    `,
+    [ownerId, startDate, endDate]
+  );
 
-  const workoutMap = new Map(workoutSummary.map((w) => [w.date, w]));
+  const workoutMap = new Map(workoutSummaryResult.rows.map((w) => [w.date, w]));
 
-  return dailyRows.map((row) => {
-    const date = row.date as string;
-    const w = workoutMap.get(date);
+  return dailyResult.rows.map((row) => {
+    const w = workoutMap.get(row.date);
     return {
-      date,
-      calories: row.calories as number,
-      proteinG: row.protein_g as number,
-      carbsG: row.carbs_g as number,
-      fatG: row.fat_g as number,
-      waterMl: row.water_ml as number,
-      sleepHours: row.sleep_hours as number,
-      workoutCount: w?.count ?? 0,
-      totalWorkoutMinutes: w?.total_minutes ?? 0,
+      date: row.date,
+      calories: Number(row.calories),
+      proteinG: Number(row.protein_g),
+      carbsG: Number(row.carbs_g),
+      fatG: Number(row.fat_g),
+      waterMl: Number(row.water_ml),
+      sleepHours: Number(row.sleep_hours),
+      workoutCount: Number(w?.count ?? 0),
+      totalWorkoutMinutes: Number(w?.total_minutes ?? 0),
     };
   });
 }
 
 // ── 更新备注 ───────────────────────────────────────────────────
 
-export function updateDailyNotes(
+export async function updateDailyNotes(
   ownerId: string,
   date: string,
   notes: string
-): void {
-  db.prepare(
+): Promise<void> {
+  await pool.query(
     `
     INSERT INTO fitness_daily (owner_id, date, notes, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?)
+    VALUES ($1, $2, $3, $4, $5)
     ON CONFLICT(owner_id, date) DO UPDATE SET
-      notes = excluded.notes,
-      updated_at = excluded.updated_at
-    `
-  ).run(ownerId, date, notes, now(), now());
+      notes = EXCLUDED.notes,
+      updated_at = EXCLUDED.updated_at
+    `,
+    [ownerId, date, notes, now(), now()]
+  );
 }
 
 // ── 历史查询 ───────────────────────────────────────────────────
 
-export function getRecentWorkouts(
+export async function getRecentWorkouts(
   ownerId: string,
   limit = 20
-): FitnessWorkout[] {
-  const rows = db
-    .prepare(
-      "SELECT * FROM fitness_workouts WHERE owner_id = ? ORDER BY created_at DESC LIMIT ?"
-    )
-    .all(ownerId, limit) as Array<Record<string, unknown>>;
-
-  return rows.map(mapWorkoutRow);
+): Promise<FitnessWorkout[]> {
+  const result = await pool.query(
+    "SELECT * FROM fitness_workouts WHERE owner_id = $1 ORDER BY created_at DESC LIMIT $2",
+    [ownerId, limit]
+  );
+  return result.rows.map(mapWorkoutRow);
 }
 
-export function getRecentMeals(ownerId: string, limit = 30): FitnessMeal[] {
-  const rows = db
-    .prepare(
-      "SELECT * FROM fitness_meals WHERE owner_id = ? ORDER BY created_at DESC LIMIT ?"
-    )
-    .all(ownerId, limit) as Array<Record<string, unknown>>;
-
-  return rows.map(mapMealRow);
+export async function getRecentMeals(ownerId: string, limit = 30): Promise<FitnessMeal[]> {
+  const result = await pool.query(
+    "SELECT * FROM fitness_meals WHERE owner_id = $1 ORDER BY created_at DESC LIMIT $2",
+    [ownerId, limit]
+  );
+  return result.rows.map(mapMealRow);
 }
 
 // ── 行映射 ─────────────────────────────────────────────────────
@@ -670,9 +640,9 @@ function mapMealRow(row: Record<string, unknown>): FitnessMeal {
     mealType: row.meal_type as MealType,
     foodName: row.food_name as string,
     calories: row.calories as number,
-    proteinG: row.protein_g as number,
-    carbsG: row.carbs_g as number,
-    fatG: row.fat_g as number,
+    proteinG: Number(row.protein_g),
+    carbsG: Number(row.carbs_g),
+    fatG: Number(row.fat_g),
     createdAt: row.created_at as string,
   };
 }

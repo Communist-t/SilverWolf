@@ -26,6 +26,7 @@ yarn-error.log*
 Thumbs.db
 .vscode/
 .idea/
+.claude/
 
 # Personal notes
 rizhi.txt
@@ -33,3 +34,11 @@ rizhi.txt
 # Test outputs
 server-3000.log
 server.log
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Codex
+.codex-run/

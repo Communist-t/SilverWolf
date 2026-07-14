@@ -14,7 +14,6 @@ import { promisify } from "node:util";
 import { logger } from "../logger.js";
 import { searchWeather as weatherSearch } from "./weather-skill.js";
 import { searchWeb } from "./web-search.js";
-import { getFitnessProfile, upsertFitnessProfile, addMeal, getMeals, deleteMeal, addWorkout, getWorkouts, deleteWorkout, updateHydration, updateSleep, getDailyLog, getDailySummary, getWeeklyTrend, updateDailyNotes, getRecentWorkouts, getRecentMeals } from "./fitness-tracker.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -47,11 +46,6 @@ export const SKILLS: SkillDefinition[] = [
     name: "technology-news-search",
     description: "科技新闻搜索与今日热搜（聚合数据 API）",
     version: "2.0.0",
-  },
-  {
-    name: "fitness",
-    description: "健身追踪与营养管理 — 体成分、宏量营养素配比(30/35/35)、运动、睡眠与水分记录",
-    version: "1.0.0",
   },
 ];
 
@@ -183,55 +177,7 @@ export { weatherSearch };
 /** 通用联网搜索（委托给 web-search） */
 export { searchWeb };
 
-// ── 健身技能导出 ───────────────────────────────────────────────
-
-/** 获取健身用户配置 */
-export { getFitnessProfile };
-
-/** 创建/更新健身用户配置 */
-export { upsertFitnessProfile };
-
-/** 添加饮食记录 */
-export { addMeal };
-
-/** 获取某日饮食记录 */
-export { getMeals };
-
-/** 删除饮食记录 */
-export { deleteMeal };
-
-/** 添加运动记录 */
-export { addWorkout };
-
-/** 获取某日运动记录 */
-export { getWorkouts };
-
-/** 删除运动记录 */
-export { deleteWorkout };
-
-/** 更新水分摄入 */
-export { updateHydration };
-
-/** 更新睡眠时长 */
-export { updateSleep };
-
-/** 获取每日日志 */
-export { getDailyLog };
-
-/** 获取每日简报 */
-export { getDailySummary };
-
-/** 获取近7日趋势 */
-export { getWeeklyTrend };
-
-/** 更新每日备注 */
-export { updateDailyNotes };
-
-/** 获取近期运动记录 */
-export { getRecentWorkouts };
-
-/** 获取近期饮食记录 */
-export { getRecentMeals };
+// ── 技能导出 ─────────────────────────────────────────────────
 
 /** 获取所有技能列表 */
 export function listSkills(): SkillDefinition[] {

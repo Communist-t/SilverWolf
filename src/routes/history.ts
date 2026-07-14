@@ -14,10 +14,20 @@ import {
 } from "../db/conversation-store.js";
 import { clearSession, removeSession } from "../agent/chat-agent.js";
 import { isSessionActive } from "./chat.js";
+import { resolveMemoryOwnerId } from "../agent/long-term-memory.js";
 
 const historyRoute = new Hono();
 const MAX_SESSION_ID_LENGTH = 120;
 const SAFE_SESSION_ID = /^[a-zA-Z0-9._:-]+$/;
+
+async function resolveOwner(c: { req: { header(name: string): string | undefined } }): Promise<string> {
+  return (await resolveMemoryOwnerId(c.req.header("X-User-Token"))) ?? "local-default";
+}
+
+async function checkSessionOwnership(sessionId: string, ownerId: string): Promise<boolean> {
+  const session = await getSession(sessionId);
+  return session?.ownerId === ownerId;
+}
 
 function validSessionId(value: string): boolean {
   return Boolean(value) && value.length <= MAX_SESSION_ID_LENGTH && SAFE_SESSION_ID.test(value);
@@ -60,8 +70,8 @@ function safeExportFileName(value: string): string {
 }
 
 function renderSessionMarkdown(
-  session: NonNullable<ReturnType<typeof getSession>>,
-  messages: ReturnType<typeof listSessionMessages>
+  session: NonNullable<Awaited<ReturnType<typeof getSession>>>,
+  messages: Awaited<ReturnType<typeof listSessionMessages>>
 ): string {
   const lines = [
     `# ${safeMarkdownHeading(session.title)}`,
@@ -95,14 +105,15 @@ function renderSessionMarkdown(
 
 historyRoute.get("/info", (c) =>
   c.json({
-    storage: "sqlite",
+    storage: "postgresql",
     persistent: true,
   })
 );
 
-historyRoute.get("/sessions", (c) => {
+historyRoute.get("/sessions", async (c) => {
   const limit = parseLimit(c.req.query("limit"), 50);
-  return c.json({ sessions: listSessions(limit) });
+  const ownerId = await resolveOwner(c);
+  return c.json({ sessions: await listSessions(limit, ownerId) });
 });
 
 historyRoute.post("/sessions", async (c) => {
@@ -117,14 +128,15 @@ historyRoute.post("/sessions", async (c) => {
   if (input.title !== undefined && typeof input.title !== "string") {
     return c.json({ error: "title 必须是字符串" }, 400);
   }
+  const ownerId = await resolveOwner(c);
   const sessionId = input.id?.trim() || `web-${crypto.randomUUID()}`;
   if (!validSessionId(sessionId)) {
     return c.json({ error: "会话 ID 格式无效" }, 400);
   }
-  if (getSession(sessionId)) {
+  if (await getSession(sessionId)) {
     return c.json({ error: "会话已存在" }, 409);
   }
-  return c.json({ session: createSession(sessionId, input.title) }, 201);
+  return c.json({ session: await createSession(sessionId, input.title, ownerId) }, 201);
 });
 
 historyRoute.post("/sessions/batch-delete", async (c) => {
@@ -151,7 +163,7 @@ historyRoute.post("/sessions/batch-delete", async (c) => {
 
   const deleted: string[] = [];
   for (const sessionId of ids) {
-    if (removeSession(sessionId)) deleted.push(sessionId);
+    if (await removeSession(sessionId)) deleted.push(sessionId);
   }
 
   return c.json({ ok: true, deleted });
@@ -160,34 +172,45 @@ historyRoute.post("/sessions/batch-delete", async (c) => {
 historyRoute.patch("/sessions/:sessionId", async (c) => {
   const sessionId = c.req.param("sessionId");
   if (!validSessionId(sessionId)) return c.json({ error: "会话 ID 格式无效" }, 400);
+  const ownerId = await resolveOwner(c);
+  if (!(await checkSessionOwnership(sessionId, ownerId))) {
+    return c.json({ error: "会话不存在或无权访问" }, 404);
+  }
   const body = await c.req.json<{ title?: string }>().catch(() => null);
   if (!body || typeof body.title !== "string") {
     return c.json({ error: "title 必须是字符串" }, 400);
   }
-  const session = renameSession(sessionId, body.title ?? "");
+  const session = await renameSession(sessionId, body.title ?? "");
   return session
     ? c.json({ session })
     : c.json({ error: "会话不存在" }, 404);
 });
 
-historyRoute.get("/sessions/:sessionId/messages", (c) => {
+historyRoute.get("/sessions/:sessionId/messages", async (c) => {
   const sessionId = c.req.param("sessionId");
   if (!validSessionId(sessionId)) return c.json({ error: "会话 ID 格式无效" }, 400);
-  if (!getSession(sessionId)) return c.json({ error: "会话不存在" }, 404);
+  const ownerId = await resolveOwner(c);
+  if (!(await checkSessionOwnership(sessionId, ownerId))) {
+    return c.json({ error: "会话不存在或无权访问" }, 404);
+  }
   const limit = parseLimit(c.req.query("limit"), 200);
   return c.json({
     sessionId,
-    messages: listSessionMessages(sessionId, limit),
+    messages: await listSessionMessages(sessionId, limit),
   });
 });
 
-historyRoute.get("/sessions/:sessionId/export", (c) => {
+historyRoute.get("/sessions/:sessionId/export", async (c) => {
   const sessionId = c.req.param("sessionId");
   if (!validSessionId(sessionId)) return c.json({ error: "会话 ID 格式无效" }, 400);
-  const session = getSession(sessionId);
+  const ownerId = await resolveOwner(c);
+  if (!(await checkSessionOwnership(sessionId, ownerId))) {
+    return c.json({ error: "会话不存在或无权访问" }, 404);
+  }
+  const session = await getSession(sessionId);
   if (!session) return c.json({ error: "会话不存在" }, 404);
 
-  const messages = listSessionMessages(sessionId, Math.max(session.messageCount, 1));
+  const messages = await listSessionMessages(sessionId, Math.max(session.messageCount, 1));
   const fileName = safeExportFileName(session.title);
   c.header("Content-Type", "text/markdown; charset=utf-8");
   c.header(
@@ -197,37 +220,51 @@ historyRoute.get("/sessions/:sessionId/export", (c) => {
   return c.body(renderSessionMarkdown(session, messages));
 });
 
-historyRoute.get("/sessions/:sessionId/summary", (c) => {
+historyRoute.get("/sessions/:sessionId/summary", async (c) => {
   const sessionId = c.req.param("sessionId");
   if (!validSessionId(sessionId)) return c.json({ error: "会话 ID 格式无效" }, 400);
-  if (!getSession(sessionId)) return c.json({ error: "会话不存在" }, 404);
+  const ownerId = await resolveOwner(c);
+  if (!(await checkSessionOwnership(sessionId, ownerId))) {
+    return c.json({ error: "会话不存在或无权访问" }, 404);
+  }
   return c.json({
     sessionId,
-    summary: getSessionSummary(sessionId),
+    summary: await getSessionSummary(sessionId),
   });
 });
 
-historyRoute.get("/sessions/:sessionId/tools", (c) => {
+historyRoute.get("/sessions/:sessionId/tools", async (c) => {
   const sessionId = c.req.param("sessionId");
   if (!validSessionId(sessionId)) return c.json({ error: "会话 ID 格式无效" }, 400);
-  if (!getSession(sessionId)) return c.json({ error: "会话不存在" }, 404);
+  const ownerId = await resolveOwner(c);
+  if (!(await checkSessionOwnership(sessionId, ownerId))) {
+    return c.json({ error: "会话不存在或无权访问" }, 404);
+  }
   const limit = parseLimit(c.req.query("limit"), 20);
-  return c.json({ sessionId, toolRuns: listToolRuns(sessionId, limit) });
+  return c.json({ sessionId, toolRuns: await listToolRuns(sessionId, limit) });
 });
 
-historyRoute.delete("/sessions/:sessionId/messages", (c) => {
+historyRoute.delete("/sessions/:sessionId/messages", async (c) => {
   const sessionId = c.req.param("sessionId");
   if (!validSessionId(sessionId)) return c.json({ error: "会话 ID 格式无效" }, 400);
+  const ownerId = await resolveOwner(c);
+  if (!(await checkSessionOwnership(sessionId, ownerId))) {
+    return c.json({ error: "会话不存在或无权访问" }, 404);
+  }
   if (isSessionActive(sessionId)) return c.json({ error: "会话正在生成回复" }, 409);
-  if (!clearSession(sessionId)) return c.json({ error: "会话不存在" }, 404);
+  if (!(await clearSession(sessionId))) return c.json({ error: "会话不存在" }, 404);
   return c.json({ ok: true, sessionId });
 });
 
-historyRoute.delete("/sessions/:sessionId", (c) => {
+historyRoute.delete("/sessions/:sessionId", async (c) => {
   const sessionId = c.req.param("sessionId");
   if (!validSessionId(sessionId)) return c.json({ error: "会话 ID 格式无效" }, 400);
+  const ownerId = await resolveOwner(c);
+  if (!(await checkSessionOwnership(sessionId, ownerId))) {
+    return c.json({ error: "会话不存在或无权访问" }, 404);
+  }
   if (isSessionActive(sessionId)) return c.json({ error: "会话正在生成回复" }, 409);
-  if (!removeSession(sessionId)) return c.json({ error: "会话不存在" }, 404);
+  if (!(await removeSession(sessionId))) return c.json({ error: "会话不存在" }, 404);
   return c.json({ ok: true, sessionId });
 });
 

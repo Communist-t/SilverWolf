@@ -84,7 +84,7 @@ chatRoute.post("/", async (c) => {
 
   const { message } = body;
   const sessionId = body.sessionId ?? "default";
-  const memoryOwnerId = resolveMemoryOwnerId(c.req.header("X-User-Token")) ?? "local-default";
+  const memoryOwnerId = (await resolveMemoryOwnerId(c.req.header("X-User-Token"))) ?? "local-default";
 
   const validationError = validateChatInput(message, sessionId);
   if (validationError) return c.json({ error: validationError }, 400);
@@ -144,6 +144,7 @@ chatRoute.post("/stream", async (c) => {
     message: string;
     sessionId?: string;
     requestId?: string;
+    attachments?: Array<{ name: string; type: string; size: number; data: string }>;
   }>().catch(() => null);
   if (!body) return c.json({ error: "请求体必须是有效 JSON" }, 400);
   const requestId = body.requestId?.trim() || createRequestId();
@@ -151,7 +152,7 @@ chatRoute.post("/stream", async (c) => {
 
   const { message } = body;
   const sessionId = body.sessionId ?? "default";
-  const memoryOwnerId = resolveMemoryOwnerId(c.req.header("X-User-Token")) ?? "local-default";
+  const memoryOwnerId = (await resolveMemoryOwnerId(c.req.header("X-User-Token"))) ?? "local-default";
 
   const validationError = validateChatInput(message, sessionId);
   if (validationError) return c.json({ error: validationError }, 400);
@@ -190,6 +191,7 @@ chatRoute.post("/stream", async (c) => {
         stream: true,
         requestId,
         memoryOwnerId,
+        attachments: body.attachments,
         onEvent: send,
         signal: request.signal,
       });

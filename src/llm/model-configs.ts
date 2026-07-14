@@ -1,29 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { db } from "../db/conversation-store.js";
+import { pool } from "../db/pool.js";
 import { config } from "../config.js";
 
 const ENV_MODEL_ID = "env-default";
 const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1";
 const DEFAULT_COMPATIBLE_BASE_URL = "https://api.example.com/v1";
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS llm_model_configs (
-    id TEXT PRIMARY KEY,
-    label TEXT NOT NULL,
-    provider TEXT NOT NULL,
-    base_url TEXT NOT NULL,
-    model TEXT NOT NULL,
-    api_key TEXT NOT NULL,
-    active INTEGER NOT NULL DEFAULT 0 CHECK (active IN (0, 1)),
-    built_in INTEGER NOT NULL DEFAULT 0 CHECK (built_in IN (0, 1)),
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_model_configs_single_active
-    ON llm_model_configs(active)
-    WHERE active = 1;
-`);
 
 export interface LlmModelConfig {
   id: string;
@@ -139,110 +120,127 @@ export function toPublicModelConfig(model: LlmModelConfig): PublicLlmModelConfig
   return { ...safeModel, hasApiKey: Boolean(apiKey.trim()) };
 }
 
-function activateFirstAvailableModel(excludedId?: string): void {
-  const fallback = db
-    .prepare(
-      `
-        SELECT id FROM llm_model_configs
-        WHERE id != ? AND TRIM(api_key) != ''
-        ORDER BY updated_at DESC
-        LIMIT 1
-      `
-    )
-    .get(excludedId ?? "") as { id: string } | undefined;
-  if (!fallback) return;
-
-  db.prepare("UPDATE llm_model_configs SET active = 0").run();
-  db.prepare("UPDATE llm_model_configs SET active = 1, updated_at = ? WHERE id = ?").run(
-    now(),
-    fallback.id
+async function activateFirstAvailableModel(excludedId?: string): Promise<void> {
+  const result = await pool.query<{ id: string }>(
+    `
+      SELECT id FROM llm_model_configs
+      WHERE id != $1 AND TRIM(api_key) != ''
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `,
+    [excludedId ?? ""]
   );
-}
+  if (result.rows.length === 0) return;
 
-function removeEnvironmentModelConfig(): void {
-  const existing = db
-    .prepare("SELECT active FROM llm_model_configs WHERE id = ?")
-    .get(ENV_MODEL_ID) as { active: number } | undefined;
-  if (!existing) return;
-
-  db.exec("BEGIN");
+  const client = await pool.connect();
   try {
-    if (existing.active) activateFirstAvailableModel(ENV_MODEL_ID);
-    db.prepare("DELETE FROM llm_model_configs WHERE id = ?").run(ENV_MODEL_ID);
-    db.exec("COMMIT");
+    await client.query("BEGIN");
+    await client.query("UPDATE llm_model_configs SET active = 0");
+    await client.query("UPDATE llm_model_configs SET active = 1, updated_at = $1 WHERE id = $2", [
+      now(),
+      result.rows[0].id,
+    ]);
+    await client.query("COMMIT");
   } catch (err) {
-    db.exec("ROLLBACK");
+    await client.query("ROLLBACK");
     throw err;
+  } finally {
+    client.release();
   }
 }
 
-export function seedEnvironmentModelConfig(): void {
+async function removeEnvironmentModelConfig(): Promise<void> {
+  const result = await pool.query<{ active: number }>(
+    "SELECT active FROM llm_model_configs WHERE id = $1",
+    [ENV_MODEL_ID]
+  );
+  if (result.rows.length === 0) return;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    if (result.rows[0].active) await activateFirstAvailableModel(ENV_MODEL_ID);
+    await client.query("DELETE FROM llm_model_configs WHERE id = $1", [ENV_MODEL_ID]);
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function seedEnvironmentModelConfig(): Promise<void> {
   const envApiKey = config.llm.apiKey.trim();
   if (!envApiKey) {
-    removeEnvironmentModelConfig();
+    await removeEnvironmentModelConfig();
     return;
   }
 
   const timestamp = now();
-  const activeCount = db
-    .prepare("SELECT COUNT(*) AS count FROM llm_model_configs WHERE active = 1")
-    .get() as { count: number };
-  const existing = db
-    .prepare("SELECT id FROM llm_model_configs WHERE id = ?")
-    .get(ENV_MODEL_ID) as { id: string } | undefined;
+  const activeResult = await pool.query<{ count: number }>(
+    "SELECT COUNT(*) AS count FROM llm_model_configs WHERE active = 1"
+  );
+  const existingResult = await pool.query<{ id: string }>(
+    "SELECT id FROM llm_model_configs WHERE id = $1",
+    [ENV_MODEL_ID]
+  );
+  const activeCount = Number(activeResult.rows[0].count);
+  const existing = existingResult.rows.length > 0;
 
-  db.prepare(
+  await pool.query(
     `
       INSERT INTO llm_model_configs (
         id, label, provider, base_url, model, api_key,
         active, built_in, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9)
       ON CONFLICT(id) DO UPDATE SET
-        provider = excluded.provider,
-        base_url = excluded.base_url,
-        model = excluded.model,
-        api_key = excluded.api_key,
-        updated_at = excluded.updated_at
-    `
-  ).run(
-    ENV_MODEL_ID,
-    "当前 .env 配置",
-    inferProvider(config.llm.baseURL, config.llm.model),
-    config.llm.baseURL,
-    config.llm.model,
-    envApiKey,
-    existing ? 0 : activeCount.count === 0 ? 1 : 0,
-    timestamp,
-    timestamp
+        provider = EXCLUDED.provider,
+        base_url = EXCLUDED.base_url,
+        model = EXCLUDED.model,
+        api_key = EXCLUDED.api_key,
+        updated_at = EXCLUDED.updated_at
+    `,
+    [
+      ENV_MODEL_ID,
+      "当前 .env 配置",
+      inferProvider(config.llm.baseURL, config.llm.model),
+      config.llm.baseURL,
+      config.llm.model,
+      envApiKey,
+      existing ? 0 : activeCount === 0 ? 1 : 0,
+      timestamp,
+      timestamp,
+    ]
   );
 }
 
-export function listLlmModelConfigs(): LlmModelConfig[] {
-  seedEnvironmentModelConfig();
-  const rows = db
-    .prepare("SELECT * FROM llm_model_configs ORDER BY active DESC, built_in DESC, updated_at DESC")
-    .all() as LlmModelConfigRow[];
-  return rows.map(mapRow);
+export async function listLlmModelConfigs(): Promise<LlmModelConfig[]> {
+  await seedEnvironmentModelConfig();
+  const result = await pool.query<LlmModelConfigRow>(
+    "SELECT * FROM llm_model_configs ORDER BY active DESC, built_in DESC, updated_at DESC"
+  );
+  return result.rows.map(mapRow);
 }
 
-export function getActiveLlmModelConfig(): LlmModelConfig {
-  seedEnvironmentModelConfig();
-  const row = db
-    .prepare("SELECT * FROM llm_model_configs WHERE active = 1 LIMIT 1")
-    .get() as LlmModelConfigRow | undefined;
-  if (row) return mapRow(row);
+export async function getActiveLlmModelConfig(): Promise<LlmModelConfig> {
+  await seedEnvironmentModelConfig();
+  const result = await pool.query<LlmModelConfigRow>(
+    "SELECT * FROM llm_model_configs WHERE active = 1 LIMIT 1"
+  );
+  if (result.rows.length > 0) return mapRow(result.rows[0]);
 
-  activateFirstAvailableModel();
-  const activated = db
-    .prepare("SELECT * FROM llm_model_configs WHERE active = 1 LIMIT 1")
-    .get() as LlmModelConfigRow | undefined;
-  if (activated) return mapRow(activated);
+  await activateFirstAvailableModel();
+  const activated = await pool.query<LlmModelConfigRow>(
+    "SELECT * FROM llm_model_configs WHERE active = 1 LIMIT 1"
+  );
+  if (activated.rows.length > 0) return mapRow(activated.rows[0]);
 
   throw new Error("没有可用的模型配置，请先在模型设置中新增 DeepSeek 配置。");
 }
 
-export function createLlmModelConfig(input: UpsertLlmModelInput): LlmModelConfig {
+export async function createLlmModelConfig(input: UpsertLlmModelInput): Promise<LlmModelConfig> {
   const errors = validateLlmModelInput(input);
   if (errors.length > 0) throw new Error(errors.join("；"));
   const timestamp = now();
@@ -252,24 +250,25 @@ export function createLlmModelConfig(input: UpsertLlmModelInput): LlmModelConfig
   const provider = normalizeProvider(input.provider, baseURL, model);
   const id = randomUUID();
 
-  db.prepare(
+  await pool.query(
     `
       INSERT INTO llm_model_configs (
         id, label, provider, base_url, model, api_key,
         active, built_in, created_at, updated_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
-    `
-  ).run(id, label, provider, baseURL, model, input.apiKey.trim(), timestamp, timestamp);
+      VALUES ($1, $2, $3, $4, $5, $6, 0, 0, $7, $8)
+    `,
+    [id, label, provider, baseURL, model, input.apiKey.trim(), timestamp, timestamp]
+  );
 
-  return getLlmModelConfig(id)!;
+  return (await getLlmModelConfig(id))!;
 }
 
-export function updateLlmModelConfig(
+export async function updateLlmModelConfig(
   id: string,
   input: Partial<UpsertLlmModelInput>
-): LlmModelConfig | null {
-  const current = getLlmModelConfig(id);
+): Promise<LlmModelConfig | null> {
+  const current = await getLlmModelConfig(id);
   if (!current || current.builtIn) return null;
   const next = {
     label: input.label ?? current.label,
@@ -282,68 +281,78 @@ export function updateLlmModelConfig(
   if (errors.length > 0) throw new Error(errors.join("；"));
   const baseURL = next.baseURL.trim();
   const model = normalizeText(next.model, 120);
-  db.prepare(
+  await pool.query(
     `
       UPDATE llm_model_configs
-      SET label = ?, provider = ?, base_url = ?, model = ?, api_key = ?, updated_at = ?
-      WHERE id = ? AND built_in = 0
-    `
-  ).run(
-    normalizeText(next.label, 80),
-    normalizeProvider(next.provider, baseURL, model),
-    baseURL,
-    model,
-    next.apiKey.trim(),
-    now(),
-    id
+      SET label = $1, provider = $2, base_url = $3, model = $4, api_key = $5, updated_at = $6
+      WHERE id = $7 AND built_in = 0
+    `,
+    [
+      normalizeText(next.label, 80),
+      normalizeProvider(next.provider, baseURL, model),
+      baseURL,
+      model,
+      next.apiKey.trim(),
+      now(),
+      id,
+    ]
   );
   return getLlmModelConfig(id);
 }
 
-export function getLlmModelConfig(id: string): LlmModelConfig | null {
-  seedEnvironmentModelConfig();
-  const row = db
-    .prepare("SELECT * FROM llm_model_configs WHERE id = ?")
-    .get(id) as LlmModelConfigRow | undefined;
-  return row ? mapRow(row) : null;
+export async function getLlmModelConfig(id: string): Promise<LlmModelConfig | null> {
+  await seedEnvironmentModelConfig();
+  const result = await pool.query<LlmModelConfigRow>(
+    "SELECT * FROM llm_model_configs WHERE id = $1",
+    [id]
+  );
+  return result.rows.length > 0 ? mapRow(result.rows[0]) : null;
 }
 
-export function setActiveLlmModelConfig(id: string): LlmModelConfig | null {
-  seedEnvironmentModelConfig();
-  const target = getLlmModelConfig(id);
+export async function setActiveLlmModelConfig(id: string): Promise<LlmModelConfig | null> {
+  await seedEnvironmentModelConfig();
+  const target = await getLlmModelConfig(id);
   if (!target) return null;
-  db.exec("BEGIN");
+
+  const client = await pool.connect();
   try {
-    db.prepare("UPDATE llm_model_configs SET active = 0").run();
-    db.prepare("UPDATE llm_model_configs SET active = 1, updated_at = ? WHERE id = ?").run(
+    await client.query("BEGIN");
+    await client.query("UPDATE llm_model_configs SET active = 0");
+    await client.query("UPDATE llm_model_configs SET active = 1, updated_at = $1 WHERE id = $2", [
       now(),
-      id
-    );
-    db.exec("COMMIT");
+      id,
+    ]);
+    await client.query("COMMIT");
   } catch (err) {
-    db.exec("ROLLBACK");
+    await client.query("ROLLBACK");
     throw err;
+  } finally {
+    client.release();
   }
   return getLlmModelConfig(id);
 }
 
-export function deleteLlmModelConfig(id: string): boolean {
-  seedEnvironmentModelConfig();
-  db.exec("BEGIN");
+export async function deleteLlmModelConfig(id: string): Promise<boolean> {
+  await seedEnvironmentModelConfig();
+  const client = await pool.connect();
   try {
-    const target = getLlmModelConfig(id);
+    await client.query("BEGIN");
+    const target = await getLlmModelConfig(id);
     if (!target || target.builtIn || target.active) {
-      db.exec("ROLLBACK");
+      await client.query("ROLLBACK");
       return false;
     }
-    const result = db
-      .prepare("DELETE FROM llm_model_configs WHERE id = ? AND built_in = 0 AND active = 0")
-      .run(id);
-    db.exec("COMMIT");
-    return result.changes > 0;
+    const result = await client.query(
+      "DELETE FROM llm_model_configs WHERE id = $1 AND built_in = 0 AND active = 0",
+      [id]
+    );
+    await client.query("COMMIT");
+    return (result.rowCount ?? 0) > 0;
   } catch (err) {
-    db.exec("ROLLBACK");
+    await client.query("ROLLBACK");
     throw err;
+  } finally {
+    client.release();
   }
 }
 

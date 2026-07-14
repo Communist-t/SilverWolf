@@ -25,6 +25,9 @@ const NEWS_PATTERN =
   /新闻|时政|热点|头条|高考|中东|伊朗|霍尔木兹|美股|股市|科技突破|国内|国际|财经|突发|来源[:：]|\[\d+\]/i;
 const NEWS_FOLLOW_UP_PATTERN =
   /更详细|详细|展开|讲讲|细说|具体|继续|然后呢|还有呢|多说点|详细信息/i;
+/** 当用户消息命中此模式且不含新闻关键词时，判定为话题已切换 */
+const NEWS_RESET_PATTERN =
+  /你好|你是谁|健身|锻炼|体重|身高|技能|插件|能力|宾至如归|反义词|同义词|近义词|英语|翻译|代码|编程|算法|数据库|服务器|部署|docker|配置文件|环境变量|端口|银狼|星穹铁道|崩坏|角色|游戏|技能列表|笨蛋|哈哈|谢谢|再见|拜拜|吃|喝|睡|玩|聊天|讲个|说个|唱|跳|rap|篮球/i;
 
 function isHardwareText(text: string): boolean {
   return HARDWARE_PATTERN.test(text);
@@ -139,29 +142,45 @@ export function extractConversationContext(
     HARDWARE_RESET_PATTERN.test(currentMessage) && !isHardwareText(currentMessage);
   const isHardwareTopic = !currentStartsNewTopic && isHardwareText(recentUserText);
   if (!isHardwareTopic) {
-    const recentText = recentUserText;
+    // 缩小回溯窗口：只看最近 6 条用户消息，避免新闻话题黏连过久
+    const recentUserTextShort = [
+      ...messages
+        .slice(-6)
+        .filter((message) => message.role === "user")
+        .map((message) => message.content),
+      currentMessage,
+    ]
+      .join("\n")
+      .trim();
+
     const assistantNewsText = messages
       .slice(-8)
       .filter((message) => message.role === "assistant")
       .map((message) => message.content)
       .join("\n");
+
+    // 话题重置检测：当前消息明显切换到非新闻话题时，不再延续新闻上下文
+    const currentIsNewsRelated = NEWS_PATTERN.test(currentMessage) || NEWS_FOLLOW_UP_PATTERN.test(currentMessage);
+    const topicReset = NEWS_RESET_PATTERN.test(currentMessage) && !currentIsNewsRelated;
+
     const isNewsTopic =
-      NEWS_PATTERN.test(recentText) ||
-      (NEWS_FOLLOW_UP_PATTERN.test(currentMessage) && NEWS_PATTERN.test(assistantNewsText));
+      !topicReset &&
+      (NEWS_PATTERN.test(recentUserTextShort) ||
+        (NEWS_FOLLOW_UP_PATTERN.test(currentMessage) && NEWS_PATTERN.test(assistantNewsText)));
 
     if (isNewsTopic) {
       const keywordCandidates = [
-        /高考/.test(`${recentText}\n${assistantNewsText}`) ? "高考" : "",
-        /中东|伊朗|霍尔木兹/.test(`${recentText}\n${assistantNewsText}`)
+        /高考/.test(`${recentUserTextShort}\n${assistantNewsText}`) ? "高考" : "",
+        /中东|伊朗|霍尔木兹/.test(`${recentUserTextShort}\n${assistantNewsText}`)
           ? "中东 伊朗 霍尔木兹"
           : "",
-        /美股|股市|芯片/.test(`${recentText}\n${assistantNewsText}`)
+        /美股|股市|芯片/.test(`${recentUserTextShort}\n${assistantNewsText}`)
           ? "美股 芯片"
           : "",
-        /科技|低碳|海工|船舶/.test(`${recentText}\n${assistantNewsText}`)
+        /科技|低碳|海工|船舶/.test(`${recentUserTextShort}\n${assistantNewsText}`)
           ? "国内 科技 突破"
           : "",
-        /政治|时政/.test(`${recentText}\n${assistantNewsText}`) ? "时政" : "",
+        /政治|时政/.test(`${recentUserTextShort}\n${assistantNewsText}`) ? "时政" : "",
       ];
       const keywords = uniq(keywordCandidates);
       const currentDate = currentDateInChina();

@@ -2,10 +2,9 @@ import test, { after, before } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createServer, type Server } from "node:http";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import Database from "better-sqlite3";
+import { pool, initDatabase } from "../src/db/pool.js";
 import {
   decideTools,
   extractTravelDestination,
@@ -455,12 +454,12 @@ test("展示首页与聊天页面使用独立入口", () => {
   assert.match(landing, /window\.addEventListener\("hashchange"/);
   assert.doesNotMatch(landing, /class="metrics"|class="metric"|系统指标/);
   assert.match(landing, /\.brand img \{[\s\S]*?transform: translateY\(-4px\)/);
-  assert.match(appSource, /app\.get\("\/", serveStatic\(\{ path: "\.\/public\/landing\.html" \}\)\)/);
-  assert.match(appSource, /app\.get\("\/showcase", serveStatic\(\{ path: "\.\/public\/landing\.html" \}\)\)/);
-  assert.match(appSource, /app\.get\("\/chat", serveStatic\(\{ path: "\.\/public\/index\.html" \}\)\)/);
+  assert.match(appSource, /app\.route\("\/chat", chatRoute\)/);
+  assert.match(appSource, /app\.route\("\/auth", authRoute\)/);
+  assert.match(appSource, /cors/);
   const startupSource = readFileSync(join(process.cwd(), "src", "index.ts"), "utf8");
-  assert.match(startupSource, /展示页: http:\/\/\$\{config\.server\.host\}:\$\{config\.server\.port\}\//);
-  assert.match(startupSource, /对话页: http:\/\/\$\{config\.server\.host\}:\$\{config\.server\.port\}\/chat/);
+  assert.match(startupSource, /API 服务/);
+  assert.match(startupSource, /\/health/);
 });
 
 test("登录页面提供独立认证入口与完整交互", () => {
@@ -471,12 +470,13 @@ test("登录页面提供独立认证入口与完整交互", () => {
   assert.match(login, /assets\/silver-wolf-background\.png/);
   assert.match(login, /id="authForm"/);
   assert.doesNotMatch(login, /id="loginCode"|id="challengeButton"|challengeCode/);
-  assert.match(login, /fetch\("\/auth\/login"/);
-  assert.match(login, /fetch\("\/auth\/register"/);
-  assert.match(login, /fetch\("\/auth\/send-code"/);
+  assert.match(login, /fetch\(`\$\{API_BASE\}\/auth\/login`/);
+  assert.match(login, /fetch\(`\$\{API_BASE\}\/auth\/register`/);
+  assert.match(login, /fetch\(`\$\{API_BASE\}\/auth\/send-code`/);
   assert.match(login, /silver-wolf-user-token/);
   assert.match(login, /@media \(max-width: 840px\)/);
-  assert.match(appSource, /app\.get\("\/login"/);
+  assert.match(appSource, /app\.route\("\/auth", authRoute\)/);
+  assert.doesNotMatch(appSource, /serveStatic/);
 
   const script = login.match(/<script>([\s\S]*?)<\/script>/)?.[1];
   assert.ok(script, "登录页面脚本不存在");
@@ -569,11 +569,7 @@ test("生产启动脚本先构建并只运行编译产物", () => {
   assert.equal(packageJson.scripts?.["start:chat"], "node dist/cli.js");
 });
 
-test("无效启动配置会非零退出且不创建数据库", () => {
-  const databasePath = join(
-    tmpdir(),
-    `silver-wolf-invalid-config-${Date.now()}-${Math.random().toString(36).slice(2)}.sqlite`
-  );
+test("无效启动配置会非零退出", () => {
   const result = spawnSync(
     process.execPath,
     ["--import", "tsx", join(process.cwd(), "src", "index.ts")],
@@ -584,20 +580,14 @@ test("无效启动配置会非零退出且不创建数据库", () => {
       env: {
         ...process.env,
         LLM_API_KEY: "sk-your-api-key",
-        DATABASE_PATH: databasePath,
       },
     }
   );
   assert.equal(result.status, 1, result.stderr || result.stdout);
   assert.match(`${result.stdout}\n${result.stderr}`, /invalid configuration/);
-  assert.equal(existsSync(databasePath), false);
 });
 
-test("命令行无效配置会清晰退出且不创建数据库", () => {
-  const databasePath = join(
-    tmpdir(),
-    `silver-wolf-invalid-cli-${Date.now()}-${Math.random().toString(36).slice(2)}.sqlite`
-  );
+test("命令行无效配置会清晰退出", () => {
   const result = spawnSync(
     process.execPath,
     ["--import", "tsx", join(process.cwd(), "src", "cli.ts")],
@@ -608,41 +598,31 @@ test("命令行无效配置会清晰退出且不创建数据库", () => {
       env: {
         ...process.env,
         LLM_API_KEY: "sk-your-api-key",
-        DATABASE_PATH: databasePath,
       },
     }
   );
   assert.equal(result.status, 1, result.stderr || result.stdout);
   assert.match(`${result.stdout}\n${result.stderr}`, /启动失败>.*占位值/);
-  assert.equal(existsSync(databasePath), false);
 });
 
-test("命令行正常退出会创建自定义数据库目录并释放文件", () => {
-  const root = mkdtempSync(join(tmpdir(), "silver-wolf-cli-exit-"));
-  const databasePath = join(root, "nested", "conversation.sqlite");
-  try {
-    const result = spawnSync(
-      process.execPath,
-      ["--import", "tsx", join(process.cwd(), "src", "cli.ts")],
-      {
-        cwd: process.cwd(),
-        encoding: "utf8",
-        input: "exit\n",
-        timeout: 15_000,
-        env: {
-          ...process.env,
-          LLM_API_KEY: "sk-test-real-value",
-          DATABASE_PATH: databasePath,
-        },
-      }
-    );
-    assert.equal(result.status, 0, result.stderr || result.stdout);
-    assert.match(result.stdout, /银狼 Agent 命令行模式/);
-    assert.match(result.stdout, /下线了/);
-    assert.equal(existsSync(databasePath), true);
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
+test("命令行正常退出会正常关闭数据库连接", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["--import", "tsx", join(process.cwd(), "src", "cli.ts")],
+    {
+      cwd: process.cwd(),
+      encoding: "utf8",
+      input: "exit\n",
+      timeout: 15_000,
+      env: {
+        ...process.env,
+        LLM_API_KEY: "sk-test-real-value",
+      },
+    }
+  );
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /银狼 Agent 命令行模式/);
+  assert.match(result.stdout, /下线了/);
 });
 
 test("新闻日期判断始终使用中国时区当天日期", () => {
@@ -758,7 +738,10 @@ before(async () => {
   process.env.LLM_API_KEY = "test-key";
   process.env.LLM_BASE_URL = `http://127.0.0.1:${mockPort}/v1`;
   process.env.LLM_MODEL = "test-model";
-  process.env.DATABASE_PATH = join(mkdtempSync(join(tmpdir(), "silver-wolf-test-")), "test.sqlite");
+  await initDatabase();
+  await pool.query(
+    "TRUNCATE sessions, users, email_verification_codes, long_term_memories, llm_model_configs, fitness_profile, fitness_daily, fitness_workouts, fitness_meals CASCADE"
+  );
   const [{ createApp }, storeModule, memoryModule] = await Promise.all([
     import("../src/app.js"),
     import("../src/db/conversation-store.js"),
@@ -773,29 +756,19 @@ after(async () => {
   await new Promise<void>((resolve, reject) =>
     mockServer.close((error) => error ? reject(error) : resolve())
   );
-  store.closeDatabase();
+  await store.closeDatabase();
 });
 
 test("HTTP 健康检查与会话 CRUD", async () => {
+  // 前后端分离后，静态页面不再由后端提供
   const landingPage = await app.request("/");
-  assert.equal(landingPage.status, 200);
-  assert.match(await landingPage.text(), /Silver Wolf AI Agent System/);
-
-  const showcasePage = await app.request("/showcase");
-  assert.equal(showcasePage.status, 200);
-  assert.match(await showcasePage.text(), /silver-wolf-showcase\.png/);
+  assert.equal(landingPage.status, 404);
 
   const chatPage = await app.request("/chat");
-  assert.equal(chatPage.status, 200);
-  assert.match(
-    chatPage.headers.get("Content-Security-Policy") ?? "",
-    /img-src 'self' data: blob:/
-  );
-  assert.match(await chatPage.text(), /银狼 Agent/);
+  assert.notEqual(chatPage.status, 200);
 
   const loginPage = await app.request("/login");
-  assert.equal(loginPage.status, 200);
-  assert.match(await loginPage.text(), /欢迎回来，特工/);
+  assert.notEqual(loginPage.status, 200);
 
   const authStatus = await app.request("/auth/status");
   assert.equal(authStatus.headers.get("Cache-Control"), "no-store");
@@ -810,7 +783,8 @@ test("HTTP 健康检查与会话 CRUD", async () => {
   assert.equal(health.headers.get("X-Content-Type-Options"), "nosniff");
   assert.equal(health.headers.get("X-Frame-Options"), "DENY");
   assert.equal(health.headers.get("Cache-Control"), "no-store");
-  assert.equal(health.headers.get("Cross-Origin-Opener-Policy"), "same-origin");
+  // 前后端分离后，COOP/COOP/CSP 等静态安全头不再由 API 层设置
+  assert.equal(health.headers.get("Cross-Origin-Opener-Policy"), null);
   const healthBody = await health.clone().json() as {
     caches: { conversations: { maxEntries: number }; search: { maxEntries: number } };
   };
@@ -934,21 +908,15 @@ test("HTTP 健康检查与会话 CRUD", async () => {
   assert.equal(chatWithActiveModel.status, 200);
   assert.equal(lastMockModel, "deepseek-reasoner");
 
-  store.db.prepare(
+  await pool.query(
     `INSERT INTO users (id, email, password_hash, display_name, avatar_url, role, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    "profile-user",
-    "profile@example.com",
-    "unused-hash",
-    "旧用户名",
-    "",
-    "user",
-    "2026-06-14T00:00:00.000Z"
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    ["profile-user", "profile@example.com", "unused-hash", "旧用户名", "", "user", "2026-06-14T00:00:00.000Z"]
   );
-  store.db.prepare(
-    "INSERT INTO user_tokens (token, user_id, created_at) VALUES (?, ?, ?)"
-  ).run("profile-token", "profile-user", "2026-06-14T00:00:00.000Z");
+  await pool.query(
+    "INSERT INTO user_tokens (token, user_id, created_at) VALUES ($1, $2, $3)",
+    ["profile-token", "profile-user", "2026-06-14T00:00:00.000Z"]
+  );
 
   const avatarUrl = "data:image/webp;base64,UklGRg==";
   const profileUpdate = await app.request("/auth/user", {
@@ -979,21 +947,15 @@ test("HTTP 健康检查与会话 CRUD", async () => {
   });
   assert.equal(invalidProfileUpdate.status, 400);
 
-  store.db.prepare(
+  await pool.query(
     `INSERT INTO users (id, email, password_hash, display_name, avatar_url, role, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    "profile-admin",
-    "profile-admin@example.com",
-    "unused-hash",
-    "系统管理员",
-    "",
-    "admin",
-    "2026-06-15T00:00:00.000Z"
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    ["profile-admin", "profile-admin@example.com", "unused-hash", "系统管理员", "", "admin", "2026-06-15T00:00:00.000Z"]
   );
-  store.db.prepare(
-    "INSERT INTO user_tokens (token, user_id, created_at) VALUES (?, ?, ?)"
-  ).run("profile-admin-token", "profile-admin", "2026-06-15T00:00:00.000Z");
+  await pool.query(
+    "INSERT INTO user_tokens (token, user_id, created_at) VALUES ($1, $2, $3)",
+    ["profile-admin-token", "profile-admin", "2026-06-15T00:00:00.000Z"]
+  );
 
   const lockedAdminName = await app.request("/auth/user", {
     method: "PATCH",
@@ -1029,7 +991,7 @@ test("HTTP 健康检查与会话 CRUD", async () => {
   });
   assert.equal(created.status, 201);
   assert.equal(created.headers.get("Cache-Control"), "no-store");
-  store.saveConversationTurn("api-crud", "**用户提问**", "## 助手回答\n\n- 第一项");
+  await store.saveConversationTurn("api-crud", "**用户提问**", "## 助手回答\n\n- 第一项");
   const exported = await app.request("/history/sessions/api-crud/export");
   assert.equal(exported.status, 200);
   assert.match(exported.headers.get("Content-Type") ?? "", /text\/markdown/);
@@ -1069,7 +1031,7 @@ test("HTTP 健康检查与会话 CRUD", async () => {
 
   const deleted = await app.request("/history/sessions/api-crud", { method: "DELETE" });
   assert.equal(deleted.status, 200);
-  assert.equal(store.getSession("api-crud"), null);
+  assert.equal(await store.getSession("api-crud"), null);
 
   const invalid = await app.request("/history/sessions", {
     method: "POST",
@@ -1087,9 +1049,9 @@ test("HTTP 健康检查与会话 CRUD", async () => {
   const boundedBody = await bounded.json() as { session: { title: string } };
   assert.equal(boundedBody.session.title.length, 80);
 
-  store.createSession("clear-content", "待清空");
-  store.saveConversationTurn("clear-content", "用户消息", "助手消息");
-  store.saveToolRun({
+  await store.createSession("clear-content", "待清空");
+  await store.saveConversationTurn("clear-content", "用户消息", "助手消息");
+  await store.saveToolRun({
     sessionId: "clear-content",
     toolType: "web_search",
     intent: "general",
@@ -1101,22 +1063,22 @@ test("HTTP 健康检查与会话 CRUD", async () => {
   });
   const cleared = await app.request("/history/sessions/clear-content/messages", { method: "DELETE" });
   assert.equal(cleared.status, 200);
-  assert.ok(store.getSession("clear-content"), "清空消息后会话必须保留");
-  assert.equal(store.getSession("clear-content")?.title, "新对话");
-  assert.equal(store.listSessionMessages("clear-content").length, 0);
-  assert.equal(store.listToolRuns("clear-content").length, 0);
+  assert.ok(await store.getSession("clear-content"), "清空消息后会话必须保留");
+  assert.equal((await store.getSession("clear-content"))?.title, "新对话");
+  assert.equal((await store.listSessionMessages("clear-content")).length, 0);
+  assert.equal((await store.listToolRuns("clear-content")).length, 0);
 
-  store.createSession("bounded-history", "历史窗口");
-  store.saveConversationTurn("bounded-history", "第一问", "第一答");
-  store.saveConversationTurn("bounded-history", "第二问", "第二答");
-  const recentWindow = store.listSessionMessages("bounded-history", 2);
+  await store.createSession("bounded-history", "历史窗口");
+  await store.saveConversationTurn("bounded-history", "第一问", "第一答");
+  await store.saveConversationTurn("bounded-history", "第二问", "第二答");
+  const recentWindow = await store.listSessionMessages("bounded-history", 2);
   assert.deepEqual(
     recentWindow.map((message) => message.content),
     ["第二问", "第二答"]
   );
 
-  const beforeOldToolRun = store.getSession("bounded-history")!.updatedAt;
-  store.saveToolRun({
+  const beforeOldToolRun = (await store.getSession("bounded-history"))!.updatedAt;
+  await store.saveToolRun({
     sessionId: "bounded-history",
     toolType: "web_search",
     intent: "general",
@@ -1127,7 +1089,7 @@ test("HTTP 健康检查与会话 CRUD", async () => {
     fetchedAt: "2020-01-01T00:00:00.000Z",
     expiresAt: "2020-01-01T01:00:00.000Z",
   });
-  assert.equal(store.getSession("bounded-history")!.updatedAt, beforeOldToolRun);
+  assert.equal((await store.getSession("bounded-history"))!.updatedAt, beforeOldToolRun);
 
   for (const path of [
     "/history/sessions/missing/messages",
@@ -1161,21 +1123,15 @@ test("永久记忆跨会话累计、召回并支持遗忘", async () => {
   );
   assert.equal(memorySystem.extractMemoryCandidates("你还记得我的喜好吗").length, 0);
 
-  store.db.prepare(
+  await pool.query(
     `INSERT INTO users (id, email, password_hash, display_name, avatar_url, role, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    "memory-user",
-    "memory@example.com",
-    "unused-hash",
-    "记忆测试玩家",
-    "",
-    "user",
-    "2026-06-15T00:00:00.000Z"
+     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    ["memory-user", "memory@example.com", "unused-hash", "记忆测试玩家", "", "user", "2026-06-15T00:00:00.000Z"]
   );
-  store.db.prepare(
-    "INSERT INTO user_tokens (token, user_id, created_at) VALUES (?, ?, ?)"
-  ).run("memory-token", "memory-user", "2026-06-15T00:00:00.000Z");
+  await pool.query(
+    "INSERT INTO user_tokens (token, user_id, created_at) VALUES ($1, $2, $3)",
+    ["memory-token", "memory-user", "2026-06-15T00:00:00.000Z"]
+  );
 
   const headers = {
     "Content-Type": "application/json",
@@ -1221,11 +1177,11 @@ test("永久记忆跨会话累计、召回并支持遗忘", async () => {
     body: JSON.stringify({ message: "忘掉我喜欢手冲咖啡这件事", sessionId: "memory-forget" }),
   });
   assert.equal(forget.status, 200);
-  const forgetBody = await forget.json() as { memory: { forgotten: number } };
-  assert.equal(forgetBody.memory.forgotten, 1);
-  assert.equal(memorySystem.listLongTermMemories("memory-user").length, 0);
+  const forgetBody = await forget.json() as { memory: { deleted: number } };
+  assert.equal(forgetBody.memory.deleted, 1);
+  assert.equal((await memorySystem.listLongTermMemories("memory-user")).length, 0);
 
-  const explicit = memorySystem.observeLongTermMemories(
+  const explicit = await memorySystem.observeLongTermMemories(
     "memory-user",
     "memory-explicit",
     "请记住，我的名字是宝宝"
@@ -1267,12 +1223,13 @@ test("可选 HTTP 鉴权保护聊天和会话接口", async () => {
   });
   assert.equal(authorized.status, 200);
 
+  // /chat 不再是静态页面路由，GET 请求应返回 404
   const publicPage = await protectedApp.request("/chat");
-  assert.equal(publicPage.status, 200);
+  assert.equal(publicPage.status, 404);
 });
 
 test("SSE 流保存消息并产生 done 事件", async () => {
-  store.createSession("sse-test", "SSE 测试");
+  await store.createSession("sse-test", "SSE 测试");
   const response = await app.request("/chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1282,11 +1239,11 @@ test("SSE 流保存消息并产生 done 事件", async () => {
   assert.match(text, /event: delta/);
   assert.match(text, /event: done/);
   assert.match(text, /银狼测试回复/);
-  assert.equal(store.listSessionMessages("sse-test").length, 2);
+  assert.equal((await store.listSessionMessages("sse-test")).length, 2);
 });
 
 test("缺少天气地点时不联网猜测并要求追问", async () => {
-  store.createSession("weather-missing-location", "天气地点");
+  await store.createSession("weather-missing-location", "天气地点");
   const response = await app.request("/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1304,8 +1261,8 @@ test("缺少天气地点时不联网猜测并要求追问", async () => {
 });
 
 test("结构化工具记忆可读取并识别过期", async () => {
-  store.createSession("tool-memory", "工具记忆");
-  store.saveToolRun({
+  await store.createSession("tool-memory", "工具记忆");
+  await store.saveToolRun({
     sessionId: "tool-memory",
     toolType: "web_search",
     intent: "news",
@@ -1315,7 +1272,7 @@ test("结构化工具记忆可读取并识别过期", async () => {
     results: [{ title: "第一条", url: "https://example.com/1" }],
     expiresAt: new Date(Date.now() + 60_000).toISOString(),
   });
-  const latest = store.getLatestToolRun<{ title: string }>("tool-memory");
+  const latest = await store.getLatestToolRun<{ title: string }>("tool-memory");
   assert.equal(latest?.results[0]?.title, "第一条");
   assert.equal(latest?.status, "success");
   assert.equal(latest?.expired, false);
@@ -1338,7 +1295,7 @@ test("结构化工具记忆可读取并识别过期", async () => {
     )
   );
 
-  store.saveToolRun({
+  await store.saveToolRun({
     sessionId: "tool-memory",
     toolType: "web_search",
     intent: "weather",
@@ -1349,21 +1306,20 @@ test("结构化工具记忆可读取并识别过期", async () => {
     fetchedAt: new Date(Date.now() - 20 * 60_000).toISOString(),
     expiresAt: new Date(Date.now() - 10 * 60_000).toISOString(),
   });
-  assert.equal(store.getLatestToolRun("tool-memory")?.expired, true);
+  assert.equal((await store.getLatestToolRun("tool-memory"))?.expired, true);
 
-  const rawDb = new Database(process.env.DATABASE_PATH!);
-  rawDb.prepare(
-    "UPDATE tool_runs SET queries_json = ?, results_json = ? WHERE id = ?"
-  ).run("not-json", "{}", latest!.id);
-  rawDb.close();
-  const recovered = store.getToolRun(latest!.id);
+  await pool.query(
+    "UPDATE tool_runs SET queries_json = $1, results_json = $2 WHERE id = $3",
+    ["not-json", "{}", latest!.id]
+  );
+  const recovered = await store.getToolRun(latest!.id);
   assert.deepEqual(recovered?.queries, []);
   assert.deepEqual(recovered?.results, []);
 });
 
 test("查询状态追问使用真实工具记录而不是猜测失败", async () => {
-  store.createSession("tool-status-follow-up", "查询状态");
-  store.saveToolRun({
+  await store.createSession("tool-status-follow-up", "查询状态");
+  await store.saveToolRun({
     sessionId: "tool-status-follow-up",
     toolType: "web_search",
     intent: "weather",
@@ -1389,9 +1345,9 @@ test("查询状态追问使用真实工具记录而不是猜测失败", async ()
   assert.doesNotMatch(responseText, /网络波动|系统抽风/);
 });
 
-test("空结果和错误工具记录保留诊断状态", () => {
-  store.createSession("tool-status-storage", "工具状态");
-  const empty = store.saveToolRun({
+test("空结果和错误工具记录保留诊断状态", async () => {
+  await store.createSession("tool-status-storage", "工具状态");
+  const empty = await store.saveToolRun({
     sessionId: "tool-status-storage",
     toolType: "web_search",
     intent: "general",
@@ -1404,7 +1360,7 @@ test("空结果和错误工具记录保留诊断状态", () => {
   });
   assert.equal(empty.status, "empty");
 
-  const failed = store.saveToolRun({
+  const failed = await store.saveToolRun({
     sessionId: "tool-status-storage",
     toolType: "web_search",
     intent: "weather",
@@ -1465,7 +1421,7 @@ test("聊天接口拒绝异常长度和非法标识", async () => {
 test("历史接口隐藏数据库路径并校验 JSON", async () => {
   const info = await app.request("/history/info");
   const body = await info.json() as Record<string, unknown>;
-  assert.deepEqual(body, { storage: "sqlite", persistent: true });
+  assert.deepEqual(body, { storage: "postgresql", persistent: true });
   assert.equal("databasePath" in body, false);
 
   const malformed = await app.request("/history/sessions/batch-delete", {
@@ -1477,7 +1433,7 @@ test("历史接口隐藏数据库路径并校验 JSON", async () => {
 });
 
 test("运行中的 SSE 请求可以取消且不保存残缺回复", async () => {
-  store.createSession("cancel-test", "取消测试");
+  await store.createSession("cancel-test", "取消测试");
   const response = await app.request("/chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1489,11 +1445,11 @@ test("运行中的 SSE 请求可以取消且不保存残缺回复", async () => 
   assert.equal(cancelled.status, 200);
   const text = await streamText;
   assert.doesNotMatch(text, /event: done/);
-  assert.equal(store.listSessionMessages("cancel-test").length, 0);
+  assert.equal((await store.listSessionMessages("cancel-test")).length, 0);
 });
 
 test("同一会话拒绝并发生成", async () => {
-  store.createSession("concurrent-test", "并发测试");
+  await store.createSession("concurrent-test", "并发测试");
   const first = await app.request("/chat/stream", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

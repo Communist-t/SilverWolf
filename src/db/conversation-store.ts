@@ -1,236 +1,15 @@
 /**
- * SQLite 对话记录存储。
+ * PostgreSQL 对话记录存储。
  *
- * 数据库文件默认保存在项目根目录的 data/silver-wolf.sqlite。
+ * 所有数据库操作均为异步，使用 pg.Pool 连接池。
  */
 
-import { mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import Database, { type Database as DatabaseType } from "better-sqlite3";
+import { pool } from "./pool.js";
 import type { Message } from "../agent/memory.js";
 import { logger } from "../logger.js";
 
-const dataDir = process.env.DATA_DIR ?? join(process.cwd(), "data");
-const databasePath =
-  process.env.DATABASE_PATH ?? join(dataDir, "silver-wolf.sqlite");
-
-mkdirSync(dirname(databasePath), { recursive: true });
-
-export const db: DatabaseType = new Database(databasePath);
-
-db.exec(`
-  PRAGMA journal_mode = WAL;
-  PRAGMA foreign_keys = ON;
-
-  CREATE TABLE IF NOT EXISTS sessions (
-    id TEXT PRIMARY KEY,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL,
-    role TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
-    content TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS session_summaries (
-    session_id TEXT PRIMARY KEY,
-    content TEXT NOT NULL,
-    summarized_through_message_id INTEGER NOT NULL DEFAULT 0,
-    updated_at TEXT NOT NULL,
-    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS tool_runs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL,
-    tool_type TEXT NOT NULL,
-    intent TEXT NOT NULL,
-    query TEXT NOT NULL,
-    queries_json TEXT NOT NULL,
-    provider TEXT NOT NULL,
-    results_json TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'success',
-    error TEXT,
-    fetched_at TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_messages_session_id_id
-    ON messages(session_id, id);
-
-  CREATE INDEX IF NOT EXISTS idx_sessions_updated_at
-    ON sessions(updated_at);
-
-  CREATE INDEX IF NOT EXISTS idx_tool_runs_session_id_id
-    ON tool_runs(session_id, id DESC);
-
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    email TEXT UNIQUE NOT NULL,
-    password_hash TEXT NOT NULL,
-    display_name TEXT NOT NULL DEFAULT '',
-    avatar_url TEXT NOT NULL DEFAULT '',
-    role TEXT NOT NULL DEFAULT 'user' CHECK (role IN ('user', 'admin', 'super_admin')),
-    created_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS user_tokens (
-    token TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS email_verification_codes (
-    email TEXT NOT NULL,
-    code TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_user_tokens_user_id
-    ON user_tokens(user_id);
-
-  CREATE INDEX IF NOT EXISTS idx_email_verification_codes_email
-    ON email_verification_codes(email);
-
-  CREATE TABLE IF NOT EXISTS long_term_memories (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    owner_id TEXT NOT NULL,
-    memory_key TEXT NOT NULL,
-    category TEXT NOT NULL,
-    content TEXT NOT NULL,
-    keywords_json TEXT NOT NULL DEFAULT '[]',
-    status TEXT NOT NULL DEFAULT 'candidate' CHECK (status IN ('candidate', 'active', 'forgotten')),
-    evidence_count INTEGER NOT NULL DEFAULT 1,
-    confidence REAL NOT NULL DEFAULT 0.5,
-    explicit INTEGER NOT NULL DEFAULT 0,
-    source_session_id TEXT NOT NULL DEFAULT '',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    last_recalled_at TEXT,
-    UNIQUE(owner_id, memory_key)
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_long_term_memories_owner_status
-    ON long_term_memories(owner_id, status, updated_at DESC);
-
-  -- 健身追踪表
-  CREATE TABLE IF NOT EXISTS fitness_profile (
-    owner_id TEXT PRIMARY KEY,
-    bmr INTEGER DEFAULT 0,
-    calorie_target INTEGER DEFAULT 0,
-    protein_target_g REAL DEFAULT 0,
-    carbs_target_g REAL DEFAULT 0,
-    fat_target_g REAL DEFAULT 0,
-    weight_kg REAL,
-    height_cm REAL,
-    age INTEGER,
-    gender TEXT,
-    activity_level TEXT DEFAULT 'sedentary',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS fitness_daily (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    owner_id TEXT NOT NULL,
-    date TEXT NOT NULL,
-    calories INTEGER DEFAULT 0,
-    protein_g REAL DEFAULT 0,
-    carbs_g REAL DEFAULT 0,
-    fat_g REAL DEFAULT 0,
-    water_ml INTEGER DEFAULT 0,
-    sleep_hours REAL DEFAULT 0,
-    notes TEXT DEFAULT '',
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL,
-    UNIQUE(owner_id, date)
-  );
-
-  CREATE TABLE IF NOT EXISTS fitness_workouts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    owner_id TEXT NOT NULL,
-    date TEXT NOT NULL,
-    type TEXT NOT NULL CHECK (type IN ('cardio', 'strength', 'mixed')),
-    duration_minutes INTEGER NOT NULL,
-    details TEXT DEFAULT '',
-    intensity TEXT DEFAULT 'moderate' CHECK (intensity IN ('low', 'moderate', 'high')),
-    created_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS fitness_meals (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    owner_id TEXT NOT NULL,
-    date TEXT NOT NULL,
-    meal_type TEXT NOT NULL CHECK (meal_type IN ('breakfast', 'lunch', 'dinner', 'snack')),
-    food_name TEXT NOT NULL,
-    calories INTEGER NOT NULL,
-    protein_g REAL DEFAULT 0,
-    carbs_g REAL DEFAULT 0,
-    fat_g REAL DEFAULT 0,
-    created_at TEXT NOT NULL
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_fitness_daily_owner_date
-    ON fitness_daily(owner_id, date DESC);
-
-  CREATE INDEX IF NOT EXISTS idx_fitness_workouts_owner_date
-    ON fitness_workouts(owner_id, date DESC);
-
-  CREATE INDEX IF NOT EXISTS idx_fitness_meals_owner_date
-    ON fitness_meals(owner_id, date DESC);
-`);
-
-const sessionColumns = db.prepare("PRAGMA table_info(sessions)").all() as Array<{
-  name: string;
-}>;
-if (!sessionColumns.some((column) => column.name === "title")) {
-  db.exec("ALTER TABLE sessions ADD COLUMN title TEXT NOT NULL DEFAULT '新对话'");
-}
-
-const toolRunColumns = db.prepare("PRAGMA table_info(tool_runs)").all() as Array<{
-  name: string;
-}>;
-if (!toolRunColumns.some((column) => column.name === "status")) {
-  db.exec("ALTER TABLE tool_runs ADD COLUMN status TEXT NOT NULL DEFAULT 'success'");
-}
-if (!toolRunColumns.some((column) => column.name === "error")) {
-  db.exec("ALTER TABLE tool_runs ADD COLUMN error TEXT");
-}
-
-const userColumns = db.prepare("PRAGMA table_info(users)").all() as Array<{
-  name: string;
-}>;
-if (!userColumns.some((column) => column.name === "role")) {
-  db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
-}
-
-db.exec(`
-  UPDATE sessions
-  SET title = COALESCE(
-    (
-      SELECT CASE
-        WHEN LENGTH(REPLACE(messages.content, CHAR(10), ' ')) > 24
-          THEN SUBSTR(REPLACE(messages.content, CHAR(10), ' '), 1, 24) || '...'
-        ELSE REPLACE(messages.content, CHAR(10), ' ')
-      END
-      FROM messages
-      WHERE messages.session_id = sessions.id
-        AND messages.role = 'user'
-      ORDER BY messages.id ASC
-      LIMIT 1
-    ),
-    '新对话'
-  )
-  WHERE title = '新对话';
-`);
+// 重新导出 initDatabase，供 index.ts / cli.ts 统一从 conversation-store 导入
+export { initDatabase } from "./pool.js";
 
 export interface StoredMessage extends Message {
   id: number;
@@ -240,6 +19,7 @@ export interface StoredMessage extends Message {
 
 export interface StoredSession {
   id: string;
+  ownerId: string;
   title: string;
   createdAt: string;
   updatedAt: string;
@@ -280,11 +60,12 @@ interface MessageRow {
 
 interface SessionRow {
   id: string;
+  owner_id: string;
   title: string;
   created_at: string;
   updated_at: string;
   message_count: number;
-  has_summary: number;
+  has_summary: boolean;
 }
 
 interface SummaryRow {
@@ -321,242 +102,168 @@ function now(): string {
   return new Date().toISOString();
 }
 
-function ensureSession(sessionId: string, timestamp = now()): void {
-  db.prepare(
-    `
-      INSERT INTO sessions (id, created_at, updated_at)
-      VALUES (?, ?, ?)
-      ON CONFLICT(id) DO UPDATE SET updated_at = CASE
-        WHEN excluded.updated_at > sessions.updated_at THEN excluded.updated_at
-        ELSE sessions.updated_at
-      END
-    `
-  ).run(sessionId, timestamp, timestamp);
-}
-
 function defaultSessionTitle(message: string): string {
   const normalized = message.replace(/\s+/g, " ").trim();
   if (!normalized) return "新对话";
   return normalized.length > 24 ? `${normalized.slice(0, 24)}...` : normalized;
 }
 
-export function createSession(sessionId: string, title = "新对话"): StoredSession {
+async function ensureSession(sessionId: string, timestamp = now(), ownerId = "local-default"): Promise<void> {
+  await pool.query(
+    `
+      INSERT INTO sessions (id, owner_id, created_at, updated_at)
+      VALUES ($1, $2, $3, $4)
+      ON CONFLICT(id) DO UPDATE SET updated_at = CASE
+        WHEN EXCLUDED.updated_at > sessions.updated_at THEN EXCLUDED.updated_at
+        ELSE sessions.updated_at
+      END
+    `,
+    [sessionId, ownerId, timestamp, timestamp]
+  );
+}
+
+export async function createSession(sessionId: string, title = "新对话", ownerId = "local-default"): Promise<StoredSession> {
   const timestamp = now();
   const normalizedTitle = title.replace(/\s+/g, " ").trim().slice(0, 80) || "新对话";
-  db.prepare(
+  await pool.query(
     `
-      INSERT INTO sessions (id, title, created_at, updated_at)
-      VALUES (?, ?, ?, ?)
+      INSERT INTO sessions (id, owner_id, title, created_at, updated_at)
+      VALUES ($1, $2, $3, $4, $5)
       ON CONFLICT(id) DO NOTHING
-    `
-  ).run(sessionId, normalizedTitle, timestamp, timestamp);
+    `,
+    [sessionId, ownerId, normalizedTitle, timestamp, timestamp]
+  );
 
-  return getSession(sessionId)!;
-}
-
-export function getSession(sessionId: string): StoredSession | null {
-  const row = db
-    .prepare(
-      `
-        SELECT
-          sessions.id,
-          sessions.title,
-          sessions.created_at,
-          sessions.updated_at,
-          COUNT(messages.id) AS message_count,
-          CASE WHEN session_summaries.session_id IS NULL THEN 0 ELSE 1 END AS has_summary
-        FROM sessions
-        LEFT JOIN messages ON messages.session_id = sessions.id
-        LEFT JOIN session_summaries ON session_summaries.session_id = sessions.id
-        WHERE sessions.id = ?
-        GROUP BY sessions.id
-      `
-    )
-    .get(sessionId) as unknown as SessionRow | undefined;
-
-  return row ? mapSessionRow(row) : null;
-}
-
-export function renameSession(sessionId: string, title: string): StoredSession | null {
-  const normalized = title.replace(/\s+/g, " ").trim();
-  if (!normalized) return getSession(sessionId);
-  db.prepare(
-    "UPDATE sessions SET title = ?, updated_at = ? WHERE id = ?"
-  ).run(normalized.slice(0, 80), now(), sessionId);
-  return getSession(sessionId);
-}
-
-export function saveConversationTurn(
-  sessionId: string,
-  userMessage: string,
-  assistantMessage: string
-): void {
-  const timestamp = now();
-
-  db.exec("BEGIN");
-  try {
-    ensureSession(sessionId, timestamp);
-    db.prepare(
-      `
-        UPDATE sessions
-        SET title = CASE WHEN title = '新对话' THEN ? ELSE title END,
-            updated_at = ?
-        WHERE id = ?
-      `
-    ).run(defaultSessionTitle(userMessage), timestamp, sessionId);
-    const insertMessage = db.prepare(
-      `
-        INSERT INTO messages (session_id, role, content, created_at)
-        VALUES (?, ?, ?, ?)
-      `
-    );
-    insertMessage.run(sessionId, "user", userMessage, timestamp);
-    insertMessage.run(sessionId, "assistant", assistantMessage, now());
-    db.exec("COMMIT");
-  } catch (err) {
-    db.exec("ROLLBACK");
-    throw err;
-  }
-}
-
-export function getRecentMessages(
-  sessionId: string,
-  limit = 100
-): Message[] {
-  const rows = db
-    .prepare(
-      `
-        SELECT id, session_id, role, content, created_at
-        FROM messages
-        WHERE session_id = ?
-        ORDER BY id DESC
-        LIMIT ?
-      `
-    )
-    .all(sessionId, limit) as unknown as MessageRow[];
-
-  return rows
-    .reverse()
-    .map((row) => ({ role: row.role, content: row.content }));
-}
-
-export function getRecentStoredMessages(
-  sessionId: string,
-  limit = 100
-): StoredMessage[] {
-  const rows = db
-    .prepare(
-      `
-        SELECT id, session_id, role, content, created_at
-        FROM messages
-        WHERE session_id = ?
-        ORDER BY id DESC
-        LIMIT ?
-      `
-    )
-    .all(sessionId, limit) as unknown as MessageRow[];
-
-  return rows.reverse().map((row) => ({
-    id: row.id,
-    sessionId: row.session_id,
-    role: row.role,
-    content: row.content,
-    createdAt: row.created_at,
-  }));
-}
-
-export function getMessageCount(sessionId: string): number {
-  const row = db
-    .prepare(
-      `
-        SELECT COUNT(*) AS count
-        FROM messages
-        WHERE session_id = ?
-      `
-    )
-    .get(sessionId) as unknown as CountRow;
-
-  return row.count;
-}
-
-export function getOldestRecentMessageId(
-  sessionId: string,
-  recentLimit = 100
-): number | null {
-  const row = db
-    .prepare(
-      `
-        SELECT MIN(id) AS cutoff_id
-        FROM (
-          SELECT id
-          FROM messages
-          WHERE session_id = ?
-          ORDER BY id DESC
-          LIMIT ?
-        )
-      `
-    )
-    .get(sessionId, recentLimit) as unknown as CutoffRow;
-
-  return row.cutoff_id;
-}
-
-export function listSessions(limit = 50): StoredSession[] {
-  const rows = db
-    .prepare(
-      `
-        SELECT
-          sessions.id,
-          sessions.title,
-          sessions.created_at,
-          sessions.updated_at,
-          COUNT(messages.id) AS message_count,
-          CASE WHEN session_summaries.session_id IS NULL THEN 0 ELSE 1 END AS has_summary
-        FROM sessions
-        LEFT JOIN messages ON messages.session_id = sessions.id
-        LEFT JOIN session_summaries ON session_summaries.session_id = sessions.id
-        GROUP BY sessions.id
-        ORDER BY sessions.updated_at DESC
-        LIMIT ?
-      `
-    )
-    .all(limit) as unknown as SessionRow[];
-
-  return rows.map(mapSessionRow);
+  return (await getSession(sessionId))!;
 }
 
 function mapSessionRow(row: SessionRow): StoredSession {
   return {
     id: row.id,
+    ownerId: row.owner_id,
     title: row.title,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
-    messageCount: row.message_count,
+    messageCount: Number(row.message_count),
     hasSummary: Boolean(row.has_summary),
   };
 }
 
-export function listSessionMessages(
-  sessionId: string,
-  limit = 200
-): StoredMessage[] {
-  const rows = db
-    .prepare(
-      `
-        SELECT id, session_id, role, content, created_at
-        FROM (
-          SELECT id, session_id, role, content, created_at
-          FROM messages
-          WHERE session_id = ?
-          ORDER BY id DESC
-          LIMIT ?
-        ) AS recent_messages
-        ORDER BY id ASC
-      `
-    )
-    .all(sessionId, limit) as unknown as MessageRow[];
+export async function getSession(sessionId: string): Promise<StoredSession | null> {
+  const result = await pool.query<SessionRow>(
+    `
+      SELECT
+        sessions.id,
+        sessions.owner_id,
+        sessions.title,
+        sessions.created_at,
+        sessions.updated_at,
+        COUNT(messages.id) AS message_count,
+        EXISTS(SELECT 1 FROM session_summaries WHERE session_summaries.session_id = sessions.id) AS has_summary
+      FROM sessions
+      LEFT JOIN messages ON messages.session_id = sessions.id
+      WHERE sessions.id = $1
+      GROUP BY sessions.id
+    `,
+    [sessionId]
+  );
 
-  return rows.map((row) => ({
+  return result.rows[0] ? mapSessionRow(result.rows[0]) : null;
+}
+
+export async function renameSession(sessionId: string, title: string): Promise<StoredSession | null> {
+  const normalized = title.replace(/\s+/g, " ").trim();
+  if (!normalized) return getSession(sessionId);
+  await pool.query(
+    "UPDATE sessions SET title = $1, updated_at = $2 WHERE id = $3",
+    [normalized.slice(0, 80), now(), sessionId]
+  );
+  return getSession(sessionId);
+}
+
+export async function saveConversationTurn(
+  sessionId: string,
+  userMessage: string,
+  assistantMessage: string,
+  ownerId = "local-default"
+): Promise<void> {
+  const timestamp = now();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `
+        INSERT INTO sessions (id, owner_id, created_at, updated_at)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT(id) DO UPDATE SET updated_at = CASE
+          WHEN EXCLUDED.updated_at > sessions.updated_at THEN EXCLUDED.updated_at
+          ELSE sessions.updated_at
+        END
+      `,
+      [sessionId, ownerId, timestamp, timestamp]
+    );
+    await client.query(
+      `
+        UPDATE sessions
+        SET title = CASE WHEN title = '新对话' THEN $1 ELSE title END,
+            updated_at = $2
+        WHERE id = $3
+      `,
+      [defaultSessionTitle(userMessage), timestamp, sessionId]
+    );
+    await client.query(
+      `INSERT INTO messages (session_id, role, content, created_at) VALUES ($1, $2, $3, $4)`,
+      [sessionId, "user", userMessage, timestamp]
+    );
+    await client.query(
+      `INSERT INTO messages (session_id, role, content, created_at) VALUES ($1, $2, $3, $4)`,
+      [sessionId, "assistant", assistantMessage, now()]
+    );
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+export async function getRecentMessages(
+  sessionId: string,
+  limit = 100
+): Promise<Message[]> {
+  const result = await pool.query<MessageRow>(
+    `
+      SELECT id, session_id, role, content, created_at
+      FROM messages
+      WHERE session_id = $1
+      ORDER BY id DESC
+      LIMIT $2
+    `,
+    [sessionId, limit]
+  );
+
+  return result.rows
+    .reverse()
+    .map((row) => ({ role: row.role, content: row.content }));
+}
+
+export async function getRecentStoredMessages(
+  sessionId: string,
+  limit = 100
+): Promise<StoredMessage[]> {
+  const result = await pool.query<MessageRow>(
+    `
+      SELECT id, session_id, role, content, created_at
+      FROM messages
+      WHERE session_id = $1
+      ORDER BY id DESC
+      LIMIT $2
+    `,
+    [sessionId, limit]
+  );
+
+  return result.rows.reverse().map((row) => ({
     id: row.id,
     sessionId: row.session_id,
     role: row.role,
@@ -565,25 +272,123 @@ export function listSessionMessages(
   }));
 }
 
-export function listMessagesForSummary(
+export async function getMessageCount(sessionId: string): Promise<number> {
+  const result = await pool.query<CountRow>(
+    `SELECT COUNT(*) AS count FROM messages WHERE session_id = $1`,
+    [sessionId]
+  );
+  return Number(result.rows[0].count);
+}
+
+export async function getOldestRecentMessageId(
+  sessionId: string,
+  recentLimit = 100
+): Promise<number | null> {
+  const result = await pool.query<CutoffRow>(
+    `
+      SELECT MIN(id) AS cutoff_id
+      FROM (
+        SELECT id
+        FROM messages
+        WHERE session_id = $1
+        ORDER BY id DESC
+        LIMIT $2
+      ) AS sub
+    `,
+    [sessionId, recentLimit]
+  );
+  return result.rows[0]?.cutoff_id ?? null;
+}
+
+export async function listSessions(limit = 50, ownerId?: string): Promise<StoredSession[]> {
+  const result = ownerId
+    ? await pool.query<SessionRow>(
+        `
+          SELECT
+            sessions.id,
+            sessions.owner_id,
+            sessions.title,
+            sessions.created_at,
+            sessions.updated_at,
+            COUNT(messages.id) AS message_count,
+            EXISTS(SELECT 1 FROM session_summaries WHERE session_summaries.session_id = sessions.id) AS has_summary
+          FROM sessions
+          LEFT JOIN messages ON messages.session_id = sessions.id
+          WHERE sessions.owner_id = $1
+          GROUP BY sessions.id
+          ORDER BY sessions.updated_at DESC
+          LIMIT $2
+        `,
+        [ownerId, limit]
+      )
+    : await pool.query<SessionRow>(
+        `
+          SELECT
+            sessions.id,
+            sessions.owner_id,
+            sessions.title,
+            sessions.created_at,
+            sessions.updated_at,
+            COUNT(messages.id) AS message_count,
+            EXISTS(SELECT 1 FROM session_summaries WHERE session_summaries.session_id = sessions.id) AS has_summary
+          FROM sessions
+          LEFT JOIN messages ON messages.session_id = sessions.id
+          GROUP BY sessions.id
+          ORDER BY sessions.updated_at DESC
+          LIMIT $1
+        `,
+        [limit]
+      );
+
+  return result.rows.map(mapSessionRow);
+}
+
+export async function listSessionMessages(
+  sessionId: string,
+  limit = 200
+): Promise<StoredMessage[]> {
+  const result = await pool.query<MessageRow>(
+    `
+      SELECT id, session_id, role, content, created_at
+      FROM (
+        SELECT id, session_id, role, content, created_at
+        FROM messages
+        WHERE session_id = $1
+        ORDER BY id DESC
+        LIMIT $2
+      ) AS recent_messages
+      ORDER BY id ASC
+    `,
+    [sessionId, limit]
+  );
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    sessionId: row.session_id,
+    role: row.role,
+    content: row.content,
+    createdAt: row.created_at,
+  }));
+}
+
+export async function listMessagesForSummary(
   sessionId: string,
   afterMessageId: number,
   beforeMessageId: number
-): StoredMessage[] {
-  const rows = db
-    .prepare(
-      `
-        SELECT id, session_id, role, content, created_at
-        FROM messages
-        WHERE session_id = ?
-          AND id > ?
-          AND id < ?
-        ORDER BY id ASC
-      `
-    )
-    .all(sessionId, afterMessageId, beforeMessageId) as unknown as MessageRow[];
+): Promise<StoredMessage[]> {
+  const result = await pool.query<MessageRow>(
+    `
+      SELECT id, session_id, role, content, created_at
+      FROM messages
+      WHERE session_id = $1
+        AND id > $2
+        AND id < $3
+      ORDER BY id ASC
+    `,
+    [sessionId, afterMessageId, beforeMessageId]
+  );
 
-  return rows.map((row) => ({
+  return result.rows.map((row) => ({
     id: row.id,
     sessionId: row.session_id,
     role: row.role,
@@ -592,119 +397,60 @@ export function listMessagesForSummary(
   }));
 }
 
-export function getSessionSummary(sessionId: string): SessionSummary | null {
-  const row = db
-    .prepare(
-      `
-        SELECT session_id, content, summarized_through_message_id, updated_at
-        FROM session_summaries
-        WHERE session_id = ?
-      `
-    )
-    .get(sessionId) as unknown as SummaryRow | undefined;
-
-  if (!row) {
-    return null;
-  }
-
+export async function getSessionSummary(sessionId: string): Promise<SessionSummary | null> {
+  const result = await pool.query<SummaryRow>(
+    `SELECT session_id, content, summarized_through_message_id, updated_at FROM session_summaries WHERE session_id = $1`,
+    [sessionId]
+  );
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0];
   return {
     sessionId: row.session_id,
     content: row.content,
-    summarizedThroughMessageId: row.summarized_through_message_id,
+    summarizedThroughMessageId: Number(row.summarized_through_message_id),
     updatedAt: row.updated_at,
   };
 }
 
-export function upsertSessionSummary(
+export async function upsertSessionSummary(
   sessionId: string,
   content: string,
-  summarizedThroughMessageId: number
-): void {
+  summarizedThroughMessageId: number,
+  ownerId = "local-default"
+): Promise<void> {
   const timestamp = now();
-
-  db.exec("BEGIN");
+  const client = await pool.connect();
   try {
-    ensureSession(sessionId, timestamp);
-    db.prepare(
+    await client.query("BEGIN");
+    await client.query(
       `
-        INSERT INTO session_summaries (
-          session_id,
-          content,
-          summarized_through_message_id,
-          updated_at
-        )
-        VALUES (?, ?, ?, ?)
+        INSERT INTO sessions (id, owner_id, created_at, updated_at)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT(id) DO UPDATE SET updated_at = CASE
+          WHEN EXCLUDED.updated_at > sessions.updated_at THEN EXCLUDED.updated_at
+          ELSE sessions.updated_at
+        END
+      `,
+      [sessionId, ownerId, timestamp, timestamp]
+    );
+    await client.query(
+      `
+        INSERT INTO session_summaries (session_id, content, summarized_through_message_id, updated_at)
+        VALUES ($1, $2, $3, $4)
         ON CONFLICT(session_id) DO UPDATE SET
-          content = excluded.content,
-          summarized_through_message_id = excluded.summarized_through_message_id,
-          updated_at = excluded.updated_at
-      `
-    ).run(sessionId, content, summarizedThroughMessageId, timestamp);
-    db.exec("COMMIT");
+          content = EXCLUDED.content,
+          summarized_through_message_id = EXCLUDED.summarized_through_message_id,
+          updated_at = EXCLUDED.updated_at
+      `,
+      [sessionId, content, summarizedThroughMessageId, timestamp]
+    );
+    await client.query("COMMIT");
   } catch (err) {
-    db.exec("ROLLBACK");
+    await client.query("ROLLBACK");
     throw err;
+  } finally {
+    client.release();
   }
-}
-
-export function saveToolRun<T>(input: {
-  sessionId: string;
-  toolType: string;
-  intent: string;
-  query: string;
-  queries: string[];
-  provider: string;
-  results: T[];
-  status?: "success" | "empty" | "error";
-  error?: string;
-  fetchedAt?: string;
-  expiresAt: string;
-}): StoredToolRun<T> {
-  const fetchedAt = input.fetchedAt ?? now();
-  ensureSession(input.sessionId, fetchedAt);
-  const result = db.prepare(`
-    INSERT INTO tool_runs (
-      session_id, tool_type, intent, query, queries_json,
-      provider, results_json, status, error, fetched_at, expires_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    input.sessionId,
-    input.toolType,
-    input.intent,
-    input.query,
-    JSON.stringify(input.queries),
-    input.provider,
-    JSON.stringify(input.results),
-    input.status ?? (input.results.length > 0 ? "success" : "empty"),
-    input.error ?? null,
-    fetchedAt,
-    input.expiresAt
-  );
-  return getToolRun(Number(result.lastInsertRowid)) as StoredToolRun<T>;
-}
-
-export function getToolRun<T = unknown>(id: number): StoredToolRun<T> | null {
-  const row = db.prepare("SELECT * FROM tool_runs WHERE id = ?").get(id) as ToolRunRow | undefined;
-  return row ? mapToolRun<T>(row) : null;
-}
-
-export function getLatestToolRun<T = unknown>(
-  sessionId: string,
-  includeExpired = true
-): StoredToolRun<T> | null {
-  const row = db.prepare(`
-    SELECT * FROM tool_runs
-    WHERE session_id = ? ${includeExpired ? "" : "AND expires_at > ?"}
-    ORDER BY id DESC LIMIT 1
-  `).get(...(includeExpired ? [sessionId] : [sessionId, now()])) as ToolRunRow | undefined;
-  return row ? mapToolRun<T>(row) : null;
-}
-
-export function listToolRuns<T = unknown>(sessionId: string, limit = 20): StoredToolRun<T>[] {
-  const rows = db.prepare(`
-    SELECT * FROM tool_runs WHERE session_id = ? ORDER BY id DESC LIMIT ?
-  `).all(sessionId, limit) as ToolRunRow[];
-  return rows.map((row) => mapToolRun<T>(row));
 }
 
 function mapToolRun<T>(row: ToolRunRow): StoredToolRun<T> {
@@ -730,50 +476,130 @@ function parseStoredArray<T>(value: string, rowId: number, field: string): T[] {
     const parsed = JSON.parse(value) as unknown;
     if (Array.isArray(parsed)) return parsed as T[];
   } catch {
-    // The warning below records enough context without exposing stored content.
+    // logged below
   }
   logger.warn("database", "invalid tool run JSON ignored", { rowId, field });
   return [];
 }
 
-export function clearSessionData(sessionId: string): boolean {
-  db.exec("BEGIN");
+export async function saveToolRun<T>(input: {
+  sessionId: string;
+  toolType: string;
+  intent: string;
+  query: string;
+  queries: string[];
+  provider: string;
+  results: T[];
+  status?: "success" | "empty" | "error";
+  error?: string;
+  fetchedAt?: string;
+  expiresAt: string;
+}): Promise<StoredToolRun<T>> {
+  const fetchedAt = input.fetchedAt ?? now();
+  await ensureSession(input.sessionId, fetchedAt);
+  const result = await pool.query<{ id: number }>(
+    `
+      INSERT INTO tool_runs (
+        session_id, tool_type, intent, query, queries_json,
+        provider, results_json, status, error, fetched_at, expires_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+      RETURNING id
+    `,
+    [
+      input.sessionId,
+      input.toolType,
+      input.intent,
+      input.query,
+      JSON.stringify(input.queries),
+      input.provider,
+      JSON.stringify(input.results),
+      input.status ?? (input.results.length > 0 ? "success" : "empty"),
+      input.error ?? null,
+      fetchedAt,
+      input.expiresAt,
+    ]
+  );
+  return (await getToolRun<T>(Number(result.rows[0].id)))!;
+}
+
+export async function getToolRun<T = unknown>(id: number): Promise<StoredToolRun<T> | null> {
+  const result = await pool.query<ToolRunRow>(
+    "SELECT * FROM tool_runs WHERE id = $1",
+    [id]
+  );
+  return result.rows[0] ? mapToolRun<T>(result.rows[0]) : null;
+}
+
+export async function getLatestToolRun<T = unknown>(
+  sessionId: string,
+  includeExpired = true
+): Promise<StoredToolRun<T> | null> {
+  const result = includeExpired
+    ? await pool.query<ToolRunRow>(
+        `SELECT * FROM tool_runs WHERE session_id = $1 ORDER BY id DESC LIMIT 1`,
+        [sessionId]
+      )
+    : await pool.query<ToolRunRow>(
+        `SELECT * FROM tool_runs WHERE session_id = $1 AND expires_at > $2 ORDER BY id DESC LIMIT 1`,
+        [sessionId, now()]
+      );
+  return result.rows[0] ? mapToolRun<T>(result.rows[0]) : null;
+}
+
+export async function listToolRuns<T = unknown>(sessionId: string, limit = 20): Promise<StoredToolRun<T>[]> {
+  const result = await pool.query<ToolRunRow>(
+    `SELECT * FROM tool_runs WHERE session_id = $1 ORDER BY id DESC LIMIT $2`,
+    [sessionId, limit]
+  );
+  return result.rows.map((row) => mapToolRun<T>(row));
+}
+
+export async function clearSessionData(sessionId: string): Promise<boolean> {
+  const client = await pool.connect();
   try {
-    const exists = Boolean(getSession(sessionId));
-    if (!exists) {
-      db.exec("ROLLBACK");
+    await client.query("BEGIN");
+    const sessionResult = await client.query("SELECT id FROM sessions WHERE id = $1", [sessionId]);
+    if (sessionResult.rows.length === 0) {
+      await client.query("ROLLBACK");
       return false;
     }
-    db.prepare("DELETE FROM messages WHERE session_id = ?").run(sessionId);
-    db.prepare("DELETE FROM session_summaries WHERE session_id = ?").run(sessionId);
-    db.prepare("DELETE FROM tool_runs WHERE session_id = ?").run(sessionId);
-    db.prepare(
-      "UPDATE sessions SET title = '新对话', updated_at = ? WHERE id = ?"
-    ).run(now(), sessionId);
-    db.exec("COMMIT");
+    await client.query("DELETE FROM messages WHERE session_id = $1", [sessionId]);
+    await client.query("DELETE FROM session_summaries WHERE session_id = $1", [sessionId]);
+    await client.query("DELETE FROM tool_runs WHERE session_id = $1", [sessionId]);
+    await client.query(
+      "UPDATE sessions SET title = '新对话', updated_at = $1 WHERE id = $2",
+      [now(), sessionId]
+    );
+    await client.query("COMMIT");
     return true;
   } catch (err) {
-    db.exec("ROLLBACK");
+    await client.query("ROLLBACK");
     throw err;
+  } finally {
+    client.release();
   }
 }
 
-export function deleteSession(sessionId: string): boolean {
-  db.exec("BEGIN");
+export async function deleteSession(sessionId: string): Promise<boolean> {
+  const client = await pool.connect();
   try {
-    const result = db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
-    db.exec("COMMIT");
-    return result.changes > 0;
+    await client.query("BEGIN");
+    const result = await client.query("DELETE FROM sessions WHERE id = $1", [sessionId]);
+    await client.query("COMMIT");
+    return (result.rowCount ?? 0) > 0;
   } catch (err) {
-    db.exec("ROLLBACK");
+    await client.query("ROLLBACK");
     throw err;
+  } finally {
+    client.release();
   }
 }
 
 export function getDatabasePath(): string {
-  return databasePath;
+  return process.env.DATABASE_URL ?? "postgresql://localhost:5432/silver_wolf_agent";
 }
 
-export function closeDatabase(): void {
-  if (db.open) db.close();
+export async function closeDatabase(): Promise<void> {
+  const { closePool } = await import("./pool.js");
+  await closePool();
 }

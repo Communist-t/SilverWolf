@@ -564,7 +564,7 @@ export function decideTools(
   const travelRequest = isTravelRequest(input);
   const newsContextFollowUp =
     context?.topic === "news" &&
-    /第?\s*(?:\d+|[一二三四五六])\s*(?:条|个|项)|更详细|详细|展开|讲讲|细说|具体|继续|然后呢|还有呢|多说点|详细信息/.test(input);
+    /(?:第\s*(?:\d+|[一二三四五六七八九十])\s*(?:条|个|项))|更详细|详细|展开|讲讲|细说|具体|继续|然后呢|还有呢|多说点|详细信息/.test(input);
 
   const useHardwareContext =
     isHardwareContext(context) && !weatherRequest && !newsContextFollowUp;

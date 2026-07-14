@@ -61,11 +61,11 @@ function safeModelTestError(error: unknown): string {
     .slice(0, 240);
 }
 
-settingsRoute.get("/models", (c) => {
-  const models = listLlmModelConfigs().map(toPublicModelConfig);
+settingsRoute.get("/models", async (c) => {
+  const models = (await listLlmModelConfigs()).map(toPublicModelConfig);
   let activeModel: PublicLlmModelConfig | null = null;
   try {
-    activeModel = toPublicModelConfig(getActiveLlmModelConfig());
+    activeModel = toPublicModelConfig(await getActiveLlmModelConfig());
   } catch {
     // 没有可用的已激活模型配置
   }
@@ -92,7 +92,7 @@ settingsRoute.get("/skills", (c) => {
 settingsRoute.post("/models/test", async (c) => {
   try {
     const input = parseModelTestInput(await c.req.json<Record<string, unknown>>());
-    const savedModel = input.modelId ? getLlmModelConfig(input.modelId) : null;
+    const savedModel = input.modelId ? await getLlmModelConfig(input.modelId) : null;
     const resolvedInput: UpsertLlmModelInput = {
       label: input.label || "模型测试",
       provider: input.provider,
@@ -149,7 +149,7 @@ settingsRoute.post("/models", async (c) => {
     const input = parseModelInput(await c.req.json<Record<string, unknown>>());
     const errors = validateLlmModelInput(input);
     if (errors.length > 0) return c.json({ error: errors.join("；") }, 400);
-    const model = createLlmModelConfig(input);
+    const model = await createLlmModelConfig(input);
     logger.info("settings", "llm model created", {
       modelId: model.id,
       provider: model.provider,
@@ -165,7 +165,7 @@ settingsRoute.post("/models", async (c) => {
 settingsRoute.patch("/models/:modelId", async (c) => {
   try {
     const input = parsePartialModelInput(await c.req.json<Record<string, unknown>>());
-    const updated = updateLlmModelConfig(c.req.param("modelId"), input);
+    const updated = await updateLlmModelConfig(c.req.param("modelId"), input);
     if (!updated) return c.json({ error: "模型配置不存在或不可编辑" }, 404);
     logger.info("settings", "llm model updated", {
       modelId: updated.id,
@@ -179,8 +179,8 @@ settingsRoute.patch("/models/:modelId", async (c) => {
   }
 });
 
-settingsRoute.post("/models/:modelId/activate", (c) => {
-  const activeModel = setActiveLlmModelConfig(c.req.param("modelId"));
+settingsRoute.post("/models/:modelId/activate", async (c) => {
+  const activeModel = await setActiveLlmModelConfig(c.req.param("modelId"));
   if (!activeModel) return c.json({ error: "模型配置不存在" }, 404);
   logger.info("settings", "llm model activated", {
     modelId: activeModel.id,
@@ -190,8 +190,8 @@ settingsRoute.post("/models/:modelId/activate", (c) => {
   return c.json({ activeModel: toPublicModelConfig(activeModel) });
 });
 
-settingsRoute.delete("/models/:modelId", (c) => {
-  const deleted = deleteLlmModelConfig(c.req.param("modelId"));
+settingsRoute.delete("/models/:modelId", async (c) => {
+  const deleted = await deleteLlmModelConfig(c.req.param("modelId"));
   return deleted
     ? c.json({ ok: true })
     : c.json({ error: "模型配置不存在、正在使用或不可删除" }, 400);

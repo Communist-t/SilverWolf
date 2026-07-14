@@ -597,26 +597,34 @@ async function searchBrave(
 }
 
 async function searchOneQuery(query: string, signal?: AbortSignal): Promise<WebSearchResult[]> {
-  const duckResults = await searchDuckDuckGo(query, signal).catch((error) => {
-    if (signal?.aborted) throw error;
-    logger.warn("web-search", "duckduckgo query failed", {
-      query,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return [];
-  });
-  if (duckResults.length >= 3) {
-    return duckResults;
+  // 并行搜索 DuckDuckGo 和 Bing，避免 DuckDuckGo 不可达时等待超时
+  const [duckSettled, bingSettled] = await Promise.allSettled([
+    searchDuckDuckGo(query, signal),
+    searchBing(query, signal),
+  ]);
+
+  if (duckSettled.status === "rejected" && duckSettled.reason !== null) {
+    const error = duckSettled.reason instanceof Error ? duckSettled.reason : new Error(String(duckSettled.reason));
+    if (!signal?.aborted) {
+      logger.warn("web-search", "duckduckgo query failed", {
+        query,
+        error: error.message,
+      });
+    }
   }
 
-  const bingResults = await searchBing(query, signal).catch((error) => {
-    if (signal?.aborted) throw error;
-    logger.warn("web-search", "bing query failed", {
-      query,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return [];
-  });
+  if (bingSettled.status === "rejected" && bingSettled.reason !== null) {
+    const error = bingSettled.reason instanceof Error ? bingSettled.reason : new Error(String(bingSettled.reason));
+    if (!signal?.aborted) {
+      logger.warn("web-search", "bing query failed", {
+        query,
+        error: error.message,
+      });
+    }
+  }
+
+  const duckResults = duckSettled.status === "fulfilled" ? duckSettled.value : [];
+  const bingResults = bingSettled.status === "fulfilled" ? bingSettled.value : [];
   return [...duckResults, ...bingResults];
 }
 

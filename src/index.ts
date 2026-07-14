@@ -11,7 +11,19 @@ import { config, validateConfig } from "./config.js";
 import { logger } from "./logger.js";
 
 async function startServer(): Promise<void> {
-  const { closeDatabase } = await import("./db/conversation-store.js");
+  const { closeDatabase, initDatabase } = await import("./db/conversation-store.js");
+
+  // 初始化 PostgreSQL schema
+  try {
+    await initDatabase();
+  } catch (error) {
+    logger.error("startup", "database initialization failed", {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    await closeDatabase();
+    throw error;
+  }
+
   let createApp: typeof import("./app.js").createApp;
   let abortAllActiveRequests: typeof import("./routes/chat.js").abortAllActiveRequests;
   try {
@@ -20,7 +32,7 @@ async function startServer(): Promise<void> {
       import("./routes/chat.js"),
     ]);
   } catch (error) {
-    closeDatabase();
+    await closeDatabase();
     throw error;
   }
 
@@ -28,7 +40,7 @@ async function startServer(): Promise<void> {
   try {
     app = createApp();
   } catch (error) {
-    closeDatabase();
+    await closeDatabase();
     throw error;
   }
 
@@ -38,7 +50,7 @@ async function startServer(): Promise<void> {
   };
   try {
     const { getActiveLlmModelConfig } = await import("./llm/model-configs.js");
-    const activeModel = getActiveLlmModelConfig();
+    const activeModel = await getActiveLlmModelConfig();
     startupModel = {
       model: activeModel.model,
       baseURL: activeModel.baseURL,
@@ -52,9 +64,9 @@ async function startServer(): Promise<void> {
   console.log(`\n🐺 银狼 Agent 启动中...`);
   console.log(`   模型: ${startupModel.model}`);
   console.log(`   监听: ${config.server.host}:${config.server.port}`);
-  console.log(`   展示页: http://${config.server.host}:${config.server.port}/`);
-  console.log(`   对话页: http://${config.server.host}:${config.server.port}/chat`);
-  console.log(`   接口: POST http://${config.server.host}:${config.server.port}/chat\n`);
+  console.log(`   API 服务: http://${config.server.host}:${config.server.port}`);
+  console.log(`   健康检查: http://${config.server.host}:${config.server.port}/health`);
+  console.log(`   对话接口: POST http://${config.server.host}:${config.server.port}/chat/stream\n`);
   logger.info("startup", "server configuration", {
     model: startupModel.model,
     baseURL: startupModel.baseURL,
@@ -88,7 +100,7 @@ async function startServer(): Promise<void> {
       port: config.server.port,
     });
   } catch (error) {
-    closeDatabase();
+    await closeDatabase();
     throw error;
   }
 
@@ -99,12 +111,12 @@ async function startServer(): Promise<void> {
         host: config.server.host,
         hint: `请关闭占用进程，或使用 PORT=${config.server.port + 1} npm run dev`,
       });
-      closeDatabase();
+      void closeDatabase();
       process.exitCode = 1;
       return;
     }
     logger.error("startup", "server failed", { error: error.message });
-    closeDatabase();
+    void closeDatabase();
     process.exitCode = 1;
   });
 
@@ -124,13 +136,13 @@ async function startServer(): Promise<void> {
     }, 10_000);
     forceTimer.unref();
 
-    server.close((error) => {
+    server.close(async (error) => {
       clearTimeout(forceTimer);
       if (error) {
         logger.error("shutdown", "server close failed", { error: error.message });
         process.exitCode = 1;
       }
-      closeDatabase();
+      await closeDatabase();
       logger.info("shutdown", "graceful shutdown completed");
     });
   }

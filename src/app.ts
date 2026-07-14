@@ -1,12 +1,11 @@
 import { Hono } from "hono";
-import { serveStatic } from "@hono/node-server/serve-static";
+import { cors } from "hono/cors";
 import { bodyLimit } from "hono/body-limit";
 import { chatRoute } from "./routes/chat.js";
 import { historyRoute } from "./routes/history.js";
 import { authRoute } from "./routes/auth.js";
 import { memoryRoute } from "./routes/memory.js";
 import { settingsRoute } from "./routes/settings.js";
-import { fitnessRoute } from "./routes/fitness.js";
 import { getConversationCacheStats } from "./agent/chat-agent.js";
 import { getSearchCacheStats } from "./tools/web-search.js";
 import { logger } from "./logger.js";
@@ -17,11 +16,31 @@ export function createApp(options: { authToken?: string } = {}): Hono {
   const app = new Hono();
   const authToken = options.authToken ?? config.security.authToken;
 
+  // CORS — 允许前端独立部署后跨域访问 API
+  app.use(
+    "*",
+    cors({
+      origin: (origin) => {
+        // 允许所有来源（开发阶段），生产环境可通过 FRONTEND_ORIGIN 环境变量限制
+        const allowed = process.env.FRONTEND_ORIGIN;
+        if (allowed && allowed !== "*") {
+          return origin && allowed.split(",").includes(origin) ? origin : null;
+        }
+        return origin ?? "*";
+      },
+      allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+      allowHeaders: ["Content-Type", "Authorization", "X-User-Token"],
+      exposeHeaders: ["X-Silver-Wolf-Agent"],
+      credentials: true,
+      maxAge: 86400,
+    })
+  );
+
   app.use(
     "*",
     bodyLimit({
-      maxSize: 64 * 1024,
-      onError: (c) => c.json({ error: "请求体过大，最多 64KB" }, 413),
+      maxSize: 16 * 1024 * 1024,
+      onError: (c) => c.json({ error: "请求体过大，最多 16MB" }, 413),
     })
   );
 
@@ -32,8 +51,7 @@ export function createApp(options: { authToken?: string } = {}): Hono {
       c.req.path.startsWith("/chat") ||
       c.req.path.startsWith("/history") ||
       c.req.path.startsWith("/memory") ||
-      c.req.path.startsWith("/settings") ||
-      c.req.path.startsWith("/fitness")
+      c.req.path.startsWith("/settings")
     ) {
       c.header("Cache-Control", "no-store");
     }
@@ -43,12 +61,6 @@ export function createApp(options: { authToken?: string } = {}): Hono {
     c.header("X-Frame-Options", "DENY");
     c.header("Referrer-Policy", "no-referrer");
     c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
-    c.header("Cross-Origin-Opener-Policy", "same-origin");
-    c.header("Cross-Origin-Resource-Policy", "same-origin");
-    c.header(
-      "Content-Security-Policy",
-      "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; connect-src 'self'"
-    );
   });
 
   app.get("/auth/status", (c) => {
@@ -71,8 +83,7 @@ export function createApp(options: { authToken?: string } = {}): Hono {
       protectsChatApi ||
       c.req.path.startsWith("/history") ||
       c.req.path.startsWith("/memory") ||
-      c.req.path.startsWith("/settings") ||
-      c.req.path.startsWith("/fitness");
+      c.req.path.startsWith("/settings");
     if (
       protectedRoute &&
       authToken &&
@@ -87,12 +98,6 @@ export function createApp(options: { authToken?: string } = {}): Hono {
     await next();
   });
 
-  app.use("/assets/*", serveStatic({ root: "./public" }));
-  app.use("/vendor/*", serveStatic({ root: "./public" }));
-  app.get("/", serveStatic({ path: "./public/landing.html" }));
-  app.get("/showcase", serveStatic({ path: "./public/landing.html" }));
-  app.get("/login", serveStatic({ path: "./public/login.html" }));
-  app.get("/chat", serveStatic({ path: "./public/index.html" }));
   app.get("/health", (c) =>
     c.json({
       status: "ok",
@@ -109,7 +114,6 @@ export function createApp(options: { authToken?: string } = {}): Hono {
   app.route("/auth", authRoute);
   app.route("/memory", memoryRoute);
   app.route("/settings", settingsRoute);
-  app.route("/fitness", fitnessRoute);
   app.notFound((c) => c.json({ error: "Not Found" }, 404));
   app.onError((err, c) => {
     logger.error("server", "unhandled request error", {

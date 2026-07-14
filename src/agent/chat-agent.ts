@@ -30,7 +30,7 @@ import { decideTools } from "../tools/tool-router.js";
 import { searchWeb, type WebSearchResult } from "../tools/web-search.js";
 import { searchWeather } from "../tools/weather-skill.js";
 import { isRelevantWebResult } from "../tools/result-relevance.js";
-import { searchTechnologyNews, getFitnessProfile, getDailySummary, getWeeklyTrend, upsertFitnessProfile, addMeal, addWorkout, updateHydration, updateSleep } from "../tools/skill-manager.js";
+import { searchTechnologyNews } from "../tools/skill-manager.js";
 import {
   extractConversationContext,
   type ConversationContext,
@@ -83,7 +83,7 @@ const memories = new Map<string, ConversationMemory>();
 const MAX_CACHED_MEMORIES = 100;
 
 /** 获取或创建会话记忆 */
-function getMemory(sessionId: string): ConversationMemory {
+async function getMemory(sessionId: string): Promise<ConversationMemory> {
   if (!memories.has(sessionId)) {
     while (memories.size >= MAX_CACHED_MEMORIES) {
       const oldestSessionId = memories.keys().next().value as string | undefined;
@@ -91,7 +91,7 @@ function getMemory(sessionId: string): ConversationMemory {
       memories.delete(oldestSessionId);
     }
     const memory = new ConversationMemory(RECENT_CONTEXT_MESSAGES / 2);
-    memory.hydrate(getRecentMessages(sessionId, RECENT_CONTEXT_MESSAGES));
+    memory.hydrate(await getRecentMessages(sessionId, RECENT_CONTEXT_MESSAGES));
     memories.set(sessionId, memory);
   } else {
     const memory = memories.get(sessionId)!;
@@ -107,20 +107,21 @@ export function getConversationCacheStats(): { entries: number; maxEntries: numb
 
 async function compressSessionContextIfNeeded(
   sessionId: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  ownerId = "local-default"
 ): Promise<void> {
   signal?.throwIfAborted();
-  const messageCount = getMessageCount(sessionId);
+  const messageCount = await getMessageCount(sessionId);
   if (messageCount <= COMPRESSION_THRESHOLD_MESSAGES) {
     return;
   }
 
-  const cutoffId = getOldestRecentMessageId(sessionId, RECENT_CONTEXT_MESSAGES);
+  const cutoffId = await getOldestRecentMessageId(sessionId, RECENT_CONTEXT_MESSAGES);
   if (cutoffId === null) {
     return;
   }
 
-  const existingSummary = getSessionSummary(sessionId);
+  const existingSummary = await getSessionSummary(sessionId);
   const summarizedThrough =
     existingSummary?.summarizedThroughMessageId ?? 0;
   const targetSummarizedThrough = cutoffId - 1;
@@ -129,7 +130,7 @@ async function compressSessionContextIfNeeded(
     return;
   }
 
-  const messagesToSummarize = listMessagesForSummary(
+  const messagesToSummarize = await listMessagesForSummary(
     sessionId,
     summarizedThrough,
     cutoffId
@@ -164,7 +165,7 @@ async function compressSessionContextIfNeeded(
     ],
   });
 
-  upsertSessionSummary(sessionId, summary, targetSummarizedThrough);
+  await upsertSessionSummary(sessionId, summary, targetSummarizedThrough, ownerId);
 }
 
 export interface SendMessageResult {
@@ -174,7 +175,6 @@ export interface SendMessageResult {
     recalled: number;
     activated: number;
     candidates: number;
-    forgotten: number;
   };
   webSearch?: {
     used: boolean;
@@ -196,12 +196,13 @@ export interface SendMessageResult {
     results: Array<{ title: string; url: string; summary: string; source: string }>;
     error?: string;
   };
-  fitnessData?: {
-    used: boolean;
-    type: "profile" | "daily" | "weekly" | "log" | "meal_add" | "workout_add" | "water" | "sleep" | "setup";
-    data: Record<string, unknown>;
-    formatted: string;
-  };
+}
+
+export interface AttachmentData {
+  name: string;
+  type: string;
+  size: number;
+  data: string;
 }
 
 export interface SendMessageCoreOptions {
@@ -212,6 +213,7 @@ export interface SendMessageCoreOptions {
   onEvent?: ChatEventHandler;
   signal?: AbortSignal;
   memoryOwnerId?: string;
+  attachments?: AttachmentData[];
 }
 
 async function emitEvent(
@@ -245,7 +247,7 @@ function isToolStatusFollowUp(input: string): boolean {
 }
 
 function buildToolStatusReply(
-  latestToolRun: ReturnType<typeof getLatestToolRun<WebSearchResult>>
+  latestToolRun: Awaited<ReturnType<typeof getLatestToolRun<WebSearchResult>>>
 ): string {
   if (!latestToolRun) {
     return "这段会话里没有可读取的联网记录，所以我不能硬猜上次到底卡在哪。重新发一次明确的查询，我会把成功、无结果还是报错分开显示。";
@@ -305,6 +307,7 @@ export async function sendMessageCore({
   onEvent,
   signal,
   memoryOwnerId = "local-default",
+  attachments,
 }: SendMessageCoreOptions): Promise<SendMessageResult> {
   signal?.throwIfAborted();
   const trimmedMessage = message.trim();
@@ -326,19 +329,19 @@ export async function sendMessageCore({
     content: `本地知识 ${knowledge.length} 条，Few-shot ${fewShots.length} 条`,
   });
 
-  const memory = getMemory(sessionId);
+  const memory = await getMemory(sessionId);
   const conversationContext = extractConversationContext(
     memory.getAll(),
     trimmedMessage
   );
-  const permanentMemories = recallLongTermMemories(memoryOwnerId, trimmedMessage);
+  const permanentMemories = await recallLongTermMemories(memoryOwnerId, trimmedMessage);
   await emitEvent(onEvent, {
     type: "step",
     name: "permanent_memory",
     content: `召回永久记忆 ${permanentMemories.length} 条`,
   });
 
-  const latestToolRun = getLatestToolRun<WebSearchResult>(sessionId);
+  const latestToolRun = await getLatestToolRun<WebSearchResult>(sessionId);
   const toolStatusFollowUp = isToolStatusFollowUp(trimmedMessage);
   const directToolStatusReply = toolStatusFollowUp
     ? buildToolStatusReply(latestToolRun)
@@ -357,7 +360,7 @@ export async function sendMessageCore({
       name: "tool_decision",
       content: "安全拦截：" + (toolDecision.safetyReason ?? "话题违规"),
     });
-    const result: SendMessageResult = { reply: "抱歉，这个话题我不能查。换一个吧。", sessionId, memory: { recalled: 0, activated: 0, candidates: 0, forgotten: 0 } };
+    const result: SendMessageResult = { reply: "抱歉，这个话题我不能查。换一个吧。", sessionId, memory: { recalled: 0, activated: 0, candidates: 0 } };
     await emitEvent(onEvent, { type: "done", content: result });
     return result;
   }
@@ -565,251 +568,6 @@ export async function sendMessageCore({
     }
   }
 
-  // ── 健身技能检测 ────────────────────────────────────────────
-  let fitnessData: SendMessageResult["fitnessData"];
-  const isFitnessQuery = /健身|饮食|热量|卡路里|碳水|蛋白质|脂肪|bmi|bmr|体脂|减脂|增肌|运动|有氧|力量训练|深蹲|跑步|卧推|睡眠|喝水|水分|体重|身高|锻炼|meal|calorie|protein|carbs|fat|workout|宏量营养素/i.test(trimmedMessage);
-
-  const ownerIdForFitness = memoryOwnerId;
-
-  if (isFitnessQuery && !referencedSource) {
-    try {
-      const profile = getFitnessProfile(ownerIdForFitness);
-      const todayStr = new Date().toISOString().slice(0, 10);
-
-      // 设置/配置类意图
-      if (/(?:设置|配置|更新|录入|我的).*(?:身体|身高|体重|年龄|性别|健身|档案|profile)/i.test(trimmedMessage)) {
-        // 提取数值
-        const weightMatch = trimmedMessage.match(/(?:体重|weight)\s*(?:是|为|：)?\s*(\d{2,3})(?:\.\d)?\s*(?:kg|公斤)?/i);
-        const heightMatch = trimmedMessage.match(/(?:身高|height)\s*(?:是|为|：)?\s*(\d{2,3})(?:\.\d)?\s*(?:cm|厘米)?/i);
-        const ageMatch = trimmedMessage.match(/(?:年龄|age|岁)\s*(?:是|为|：)?\s*(\d{1,2})/i);
-        const genderMatch = trimmedMessage.match(/(?:性别|gender|男|女|male|female)/i);
-        const maleMatch = trimmedMessage.match(/男|male/i);
-        const femaleMatch = trimmedMessage.match(/女|female/i);
-
-        if (weightMatch || heightMatch || ageMatch || genderMatch) {
-          const updateData: {
-            weightKg?: number;
-            heightCm?: number;
-            age?: number;
-            gender?: "male" | "female";
-            activityLevel?: "sedentary" | "light" | "moderate" | "active" | "very_active";
-          } = {};
-
-          if (weightMatch) updateData.weightKg = Number(weightMatch[1]);
-          if (heightMatch) updateData.heightCm = Number(heightMatch[1]);
-          if (ageMatch) updateData.age = Number(ageMatch[1]);
-          if (maleMatch && !femaleMatch) updateData.gender = "male";
-          if (femaleMatch && !maleMatch) updateData.gender = "female";
-          if (/久坐|不运动|sedentary/i.test(trimmedMessage)) updateData.activityLevel = "sedentary";
-          if (/轻度|light/i.test(trimmedMessage)) updateData.activityLevel = "light";
-          if (/中度|moderate/i.test(trimmedMessage)) updateData.activityLevel = "moderate";
-          if (/活跃|active/i.test(trimmedMessage)) updateData.activityLevel = "active";
-          if (/高强度|very.active/i.test(trimmedMessage)) updateData.activityLevel = "very_active";
-
-          upsertFitnessProfile(ownerIdForFitness, updateData);
-          const updatedProfile = getFitnessProfile(ownerIdForFitness);
-
-          if (updatedProfile && updatedProfile.bmr > 0) {
-            const macros = await import("../tools/fitness-tracker.js").then(m => m.calculateMacroSplit(updatedProfile.calorieTarget));
-            fitnessData = {
-              used: true,
-              type: "setup",
-              data: updatedProfile as unknown as Record<string, unknown>,
-              formatted:
-                `=== 健身档案已设置 ===\n` +
-                `基础代谢(BMR)：${updatedProfile.bmr} kcal\n` +
-                `目标热量：${updatedProfile.calorieTarget} kcal\n` +
-                `宏量营养素目标：\n` +
-                `  蛋白质：${macros.proteinG}g（${macros.proteinCal}kcal，占30%）\n` +
-                `  碳水：${macros.carbsG}g（${macros.carbsCal}kcal，占35%）\n` +
-                `  脂肪：${macros.fatG}g（${macros.fatCal}kcal，占35%）\n` +
-                `水分目标：约2000-2500ml/天\n` +
-                `睡眠目标：7-8小时/天`,
-            };
-          }
-        }
-      }
-
-      // 饮食记录
-      if (!fitnessData && /(?:吃了|喝[了了]?|早餐|午餐|晚餐|加餐|meal|eat|食物|米饭|鸡胸|鸡蛋|牛奶)/i.test(trimmedMessage)) {
-        const mealMatch = trimmedMessage.match(/(?:早餐|breakfast|午饭|午餐|lunch|晚饭|晚餐|dinner|加餐|零食|snack)/i);
-        let mealType: "breakfast" | "lunch" | "dinner" | "snack" = "snack";
-        if (mealMatch) {
-          const mt = mealMatch[0].toLowerCase();
-          if (/早|breakfast/.test(mt)) mealType = "breakfast";
-          else if (/午|lunch/.test(mt)) mealType = "lunch";
-          else if (/晚|dinner/.test(mt)) mealType = "dinner";
-          else mealType = "snack";
-        }
-
-        const foodMatch = trimmedMessage.match(/(?:吃了|喝了|吃了什么|吃了啥)\s*(.+?)(?:\s*\d+|$)/i) ||
-                         trimmedMessage.match(/(.+?)(?:\s*(\d+)g|\s*(\d+)卡|\s*(\d+))/i);
-        const calMatch = trimmedMessage.match(/(\d+)\s*(?:卡|千卡|kcal|calories?|大卡)/i);
-        const proteinMatch = trimmedMessage.match(/(\d+(?:\.\d)?)\s*(?:g)?\s*(?:蛋白|蛋白质|protein)/i);
-        const carbsMatch = trimmedMessage.match(/(\d+(?:\.\d)?)\s*(?:g)?\s*(?:碳水|碳水化合物|carbs)/i);
-        const fatMatch = trimmedMessage.match(/(\d+(?:\.\d)?)\s*(?:g)?\s*(?:脂肪|fat)/i);
-
-        if (foodMatch || calMatch) {
-          const foodName = foodMatch?.[1]?.trim() || (calMatch ? "食物" : "未知食物");
-          const calories = calMatch ? Number(calMatch[1]) : 0;
-          const proteinG = proteinMatch ? Number(proteinMatch[1]) : 0;
-          const carbsG = carbsMatch ? Number(carbsMatch[1]) : 0;
-          const fatG = fatMatch ? Number(fatMatch[1]) : 0;
-
-          addMeal(ownerIdForFitness, todayStr, mealType, foodName, calories, proteinG, carbsG, fatG);
-          const summary = getDailySummary(ownerIdForFitness, todayStr);
-
-          fitnessData = {
-            used: true,
-            type: "meal_add",
-            data: { foodName, calories, proteinG, carbsG, fatG, mealType } as unknown as Record<string, unknown>,
-            formatted:
-              `=== 饮食已记录 ===\n` +
-              `添加：${foodName}（${mealType === "breakfast" ? "早餐" : mealType === "lunch" ? "午餐" : mealType === "dinner" ? "晚餐" : "加餐"}）\n` +
-              `热量：${calories}kcal\n` +
-              `蛋白质：${proteinG}g / 碳水：${carbsG}g / 脂肪：${fatG}g\n` +
-              (summary ? `今日累计：${summary.calories}kcal（目标${profile?.calorieTarget ?? "?"}kcal）` : ""),
-          };
-        }
-      }
-
-      // 运动记录
-      if (!fitnessData && /(?:锻炼|运动|workout|跑步|慢跑|游泳|骑行|跳绳|深蹲|卧推|硬拉|举铁|有氧|力量|cardio|strength)/i.test(trimmedMessage)) {
-        const durationMatch = trimmedMessage.match(/(\d+)\s*(?:分钟|min|分钟|分)/i);
-        const typeMatch = trimmedMessage.match(/(?:跑步|慢跑|游泳|骑行|跳绳|有氧|cardio|椭圆机|划船机)/i) ? "cardio" :
-                         trimmedMessage.match(/(?:深蹲|卧推|硬拉|举铁|力量|哑铃|杠铃|strength)/i) ? "strength" : null;
-
-        if (durationMatch) {
-          const workoutType: "cardio" | "strength" | "mixed" = typeMatch as "cardio" | "strength" ?? "mixed";
-          const duration = Number(durationMatch[1]);
-          const detailMatch = trimmedMessage.match(/(?:做了|做了|练了|练了)\s*(.+?)(?:\s*\d+|$)/i);
-          const details = detailMatch?.[1]?.trim() || "";
-
-          addWorkout(ownerIdForFitness, todayStr, workoutType, duration, details);
-          const weekTrend = getWeeklyTrend(ownerIdForFitness);
-
-          fitnessData = {
-            used: true,
-            type: "workout_add",
-            data: { type: workoutType, duration, details } as unknown as Record<string, unknown>,
-            formatted:
-              `=== 运动已记录 ===\n` +
-              `类型：${workoutType === "cardio" ? "有氧" : workoutType === "strength" ? "力量" : "混合"}\n` +
-              `时长：${duration}分钟\n` +
-              (details ? `详情：${details}\n` : "") +
-              (weekTrend.length > 0 ? `近7天总运动量：${weekTrend.reduce((s, d) => s + d.totalWorkoutMinutes, 0)}分钟` : ""),
-          };
-        }
-      }
-
-      // 水分记录
-      if (!fitnessData && /(?:水|喝水|水分|water|hydrate)/i.test(trimmedMessage)) {
-        const waterMatch = trimmedMessage.match(/(\d+)\s*(?:ml|毫升|杯)/i);
-        if (waterMatch) {
-          const waterMl = trimmedMessage.includes("杯") ? Number(waterMatch[1]) * 250 : Number(waterMatch[1]);
-          updateHydration(ownerIdForFitness, todayStr, waterMl);
-
-          fitnessData = {
-            used: true,
-            type: "water",
-            data: { waterMl } as unknown as Record<string, unknown>,
-            formatted: `=== 水分已记录 ===\n饮水：${waterMl}ml`,
-          };
-        }
-      }
-
-      // 睡眠记录
-      if (!fitnessData && /(?:睡眠|睡觉|睡了|sleep)/i.test(trimmedMessage)) {
-        const sleepMatch = trimmedMessage.match(/(\d+(?:\.\d)?)\s*(?:小时|h|hr)/i);
-        if (sleepMatch) {
-          const sleepHours = Number(sleepMatch[1]);
-          updateSleep(ownerIdForFitness, todayStr, sleepHours);
-
-          fitnessData = {
-            used: true,
-            type: "sleep",
-            data: { sleepHours } as unknown as Record<string, unknown>,
-            formatted: `=== 睡眠已记录 ===\n睡眠时长：${sleepHours}小时`,
-          };
-        }
-      }
-
-      // 查询今日简报
-      if (!fitnessData && /(?:今日|今天|日报|简报|summary|today|进度|进展)/i.test(trimmedMessage)) {
-        const summary = getDailySummary(ownerIdForFitness, todayStr);
-        if (summary && profile) {
-          const weekTrend = getWeeklyTrend(ownerIdForFitness);
-
-          fitnessData = {
-            used: true,
-            type: "daily",
-            data: summary as unknown as Record<string, unknown>,
-            formatted:
-              `=== ${todayStr} 健身简报 ===\n` +
-              `热量：${summary.calories} / ${profile.calorieTarget} kcal（剩余${summary.remainingCalories}）\n` +
-              `蛋白质：${summary.macros.protein}g / ${profile.proteinTargetG}g（${summary.macroProgress.proteinPct}%）\n` +
-              `碳水：${summary.macros.carbs}g / ${profile.carbsTargetG}g（${summary.macroProgress.carbsPct}%）\n` +
-              `脂肪：${summary.macros.fat}g / ${profile.fatTargetG}g（${summary.macroProgress.fatPct}%）\n` +
-              `水分：${summary.waterMl}ml\n` +
-              `睡眠：${summary.sleepHours}小时\n` +
-              `运动：${summary.workouts.length}次\n` +
-              (weekTrend.length > 0
-                ? `\n近7日均摄入：${Math.round(weekTrend.reduce((s, d) => s + d.calories, 0) / weekTrend.length)}kcal/天\n` +
-                  `近7日均运动：${Math.round(weekTrend.reduce((s, d) => s + d.totalWorkoutMinutes, 0) / weekTrend.length)}分钟/天`
-                : ""),
-          };
-        } else if (!profile) {
-          fitnessData = {
-            used: true,
-            type: "profile",
-            data: {},
-            formatted: "=== 尚未设置健身档案 ===\n请先录入身高、体重、年龄等信息，例如：\"我身高170体重65kg，25岁男\"",
-          };
-        }
-      }
-
-      // 查询配置信息
-      if (!fitnessData && profile && /(?:配置|档案|profile|我的身体|我的数据)/i.test(trimmedMessage)) {
-        const macros = await import("../tools/fitness-tracker.js").then(m => m.calculateMacroSplit(profile.calorieTarget));
-        fitnessData = {
-          used: true,
-          type: "profile",
-          data: profile as unknown as Record<string, unknown>,
-          formatted:
-            `=== 健身档案 ===\n` +
-            `基础代谢(BMR)：${profile.bmr} kcal\n` +
-            `目标热量：${profile.calorieTarget} kcal\n` +
-            (profile.weightKg ? `体重：${profile.weightKg}kg\n` : "") +
-            (profile.heightCm ? `身高：${profile.heightCm}cm\n` : "") +
-            (profile.age ? `年龄：${profile.age}岁\n` : "") +
-            (profile.gender ? `性别：${profile.gender === "male" ? "男" : "女"}\n` : "") +
-            `宏量营养素目标（30%蛋白 / 35%碳水 / 35%脂肪）：\n` +
-            `  蛋白质：${macros.proteinG}g\n` +
-            `  碳水：${macros.carbsG}g\n` +
-            `  脂肪：${macros.fatG}g`,
-        };
-      }
-
-      if (fitnessData) {
-        logger.info("agent", "fitness data loaded", {
-          requestId,
-          type: fitnessData.type,
-        });
-        await emitEvent(onEvent, {
-          type: "step",
-          name: "memory",
-          content: `健身数据加载（${fitnessData.type}）`,
-        });
-      }
-    } catch (err) {
-      if (signal?.aborted) throw signal.reason ?? err;
-      logger.error("agent", "fitness tracking error", {
-        requestId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
   // 2. 获取历史记忆
   await emitEvent(onEvent, {
     type: "step",
@@ -861,7 +619,7 @@ export async function sendMessageCore({
     });
   }
 
-  const summary = getSessionSummary(sessionId);
+  const summary = await getSessionSummary(sessionId);
   if (summary) {
     messages.push({
       role: "system",
@@ -984,17 +742,36 @@ ${newsText}
   // 注入历史记忆
   messages.push(...memory.getAll());
 
-  // 注入健身数据
-  if (fitnessData?.used) {
-    messages.push({
-      role: "system",
-      content:
-        `以下是健身追踪模块的实时数据。请基于这些数据回答，保持银狼语气，但数据本身要准确。不要编造不存在的记录。\n${fitnessData.formatted}`,
-    });
+  // 注入当前用户消息（含附件）
+  if (attachments && attachments.length > 0) {
+    const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
+    // 文本类附件内容
+    const TEXT_EXTENSIONS = new Set([".txt", ".md", ".csv", ".json", ".xml", ".html", ".css", ".js", ".ts", ".py", ".java", ".c", ".cpp", ".go", ".rs"]);
+    for (const att of attachments) {
+      const isImage = att.type.startsWith("image/");
+      const ext = att.name.includes(".") ? "." + att.name.split(".").pop()!.toLowerCase() : "";
+      if (isImage) {
+        contentParts.push({
+          type: "image_url",
+          image_url: { url: `data:${att.type};base64,${att.data}` },
+        });
+      } else if (TEXT_EXTENSIONS.has(ext)) {
+        try {
+          const text = Buffer.from(att.data, "base64").toString("utf-8");
+          const preview = text.length > 8000 ? text.slice(0, 8000) + "\n...(已截断)" : text;
+          contentParts.push({ type: "text", text: `[附件: ${att.name}]\n${preview}` });
+        } catch {
+          contentParts.push({ type: "text", text: `[附件: ${att.name}] (内容解码失败)` });
+        }
+      } else {
+        contentParts.push({ type: "text", text: `[附件: ${att.name} (${(att.size / 1024).toFixed(1)}KB, ${att.type || "未知类型"})]` });
+      }
+    }
+    contentParts.push({ type: "text", text: trimmedMessage });
+    messages.push({ role: "user", content: contentParts as unknown as string });
+  } else {
+    messages.push({ role: "user", content: trimmedMessage });
   }
-
-  // 注入当前用户消息
-  messages.push({ role: "user", content: trimmedMessage });
 
   // 4. 调用大模型
   await emitEvent(onEvent, {
@@ -1049,9 +826,9 @@ ${newsText}
   });
 
   // 5. 保存记忆
-  saveConversationTurn(sessionId, trimmedMessage, reply);
+  await saveConversationTurn(sessionId, trimmedMessage, reply, memoryOwnerId);
   if (webSearch?.used && webSearch.fetchedAt && webSearch.provider && webSearch.intent) {
-    saveToolRun({
+    await saveToolRun({
       sessionId,
       toolType: "web_search",
       intent: webSearch.intent,
@@ -1068,7 +845,7 @@ ${newsText}
     });
   }
   memory.add(trimmedMessage, reply);
-  const memoryUpdate = observeLongTermMemories(
+  const memoryUpdate = await observeLongTermMemories(
     memoryOwnerId,
     sessionId,
     trimmedMessage
@@ -1076,11 +853,11 @@ ${newsText}
   await emitEvent(onEvent, {
     type: "step",
     name: "database",
-    content: `对话已保存到 SQLite；永久记忆激活 ${memoryUpdate.activated.length} 条，候选 ${memoryUpdate.observed.filter((item) => item.status === "candidate").length} 条`,
+    content: `对话已保存到 PostgreSQL；永久记忆激活 ${memoryUpdate.activated.length} 条，候选 ${memoryUpdate.observed.filter((item) => item.status === "candidate").length} 条`,
   });
 
   try {
-    await compressSessionContextIfNeeded(sessionId, signal);
+    await compressSessionContextIfNeeded(sessionId, signal, memoryOwnerId);
     await emitEvent(onEvent, {
       type: "step",
       name: "compression",
@@ -1104,12 +881,10 @@ ${newsText}
     sessionId,
     webSearch,
     newsSearch,
-    fitnessData,
     memory: {
       recalled: permanentMemories.length,
       activated: memoryUpdate.activated.length,
       candidates: memoryUpdate.observed.filter((item) => item.status === "candidate").length,
-      forgotten: memoryUpdate.forgotten,
     },
   };
   await emitEvent(onEvent, { type: "done", content: result });
@@ -1125,14 +900,14 @@ export async function sendMessage(
   return sendMessageCore({ message, sessionId, signal, memoryOwnerId });
 }
 
-export function clearSession(sessionId = "default"): boolean {
-  const cleared = clearSessionData(sessionId);
+export async function clearSession(sessionId = "default"): Promise<boolean> {
+  const cleared = await clearSessionData(sessionId);
   if (cleared) memories.delete(sessionId);
   return cleared;
 }
 
-export function removeSession(sessionId = "default"): boolean {
-  const removed = deleteSession(sessionId);
+export async function removeSession(sessionId = "default"): Promise<boolean> {
+  const removed = await deleteSession(sessionId);
   if (removed) memories.delete(sessionId);
   return removed;
 }

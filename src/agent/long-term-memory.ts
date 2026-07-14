@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { db } from "../db/conversation-store.js";
+import { pool } from "../db/pool.js";
 import { logger } from "../logger.js";
 
 export type LongTermMemoryCategory =
@@ -10,7 +10,7 @@ export type LongTermMemoryCategory =
   | "goal"
   | "fact";
 
-export type LongTermMemoryStatus = "candidate" | "active" | "forgotten";
+export type LongTermMemoryStatus = "candidate" | "active";
 
 export interface LongTermMemory {
   id: number;
@@ -122,7 +122,9 @@ function candidate(
 }
 
 function extractRememberedContent(input: string): string | null {
-  const match = input.match(/^(?:(?:请|麻烦你)\s*(?:记住|记得)|你(?:要|得)\s*(?:记住|记得)|记住[，,：:])\s*(.+)$/);
+  const match = input.match(
+    /^(?:(?:请|麻烦你|帮我|帮我把)\s*(?:记住|记得)|你(?:要|得)\s*(?:记住|记得)|(?:记住|记得)[：:,，]?)\s*(.+)$/s
+  );
   return match ? cleanValue(match[1]) : null;
 }
 
@@ -169,6 +171,18 @@ export function extractMemoryCandidates(input: string): MemoryCandidate[] {
     }));
   }
 
+  const identity = text.match(/(?:^|[\s，。])(?:我是)([^，。！？!?\n]{2,16})/);
+  if (identity && !name && !occupation) {
+    const value = cleanValue(identity[1]);
+    if (value.length >= 2 && !/[的是了在着有过吧吗啊呢]/.test(value)) {
+      add(candidate("profile", `profile:identity:${hashedKey(normalizedKey(value))}`, `玩家身份是${value}`, value, {
+        explicit: Boolean(remembered),
+        activationThreshold: remembered ? 1 : 2,
+        confidence: remembered ? 0.9 : 0.65,
+      }));
+    }
+  }
+
   const dislike = text.match(/(?:我不喜欢|我讨厌|我不爱)\s*([^，。！？!?\n]{1,80})/);
   if (dislike) {
     const value = cleanValue(dislike[1]);
@@ -213,6 +227,17 @@ export function extractMemoryCandidates(input: string): MemoryCandidate[] {
     }));
   }
 
+  const expectation = text.match(/(?:我希望|我期望|我希望你|我希望银狼)\s*([^，。！？!?\n]{2,100})/);
+  if (expectation && !/(?:以后|将来|未来|过段时间)/.test(expectation[0])) {
+    const value = cleanValue(expectation[1]);
+    const objectKey = hashedKey(normalizedKey(value));
+    add(candidate("preference", `preference:expect:${objectKey}`, `玩家的期望是${value}`, value, {
+      explicit: Boolean(remembered),
+      activationThreshold: remembered ? 1 : 2,
+      confidence: remembered ? 0.9 : 0.64,
+    }));
+  }
+
   const stableClauses = text
     .split(/[。！？!?；;\n]+/)
     .map(cleanValue)
@@ -247,12 +272,13 @@ export function extractMemoryCandidates(input: string): MemoryCandidate[] {
   return found;
 }
 
-export function resolveMemoryOwnerId(token?: string | null): string | null {
+export async function resolveMemoryOwnerId(token?: string | null): Promise<string | null> {
   if (!token) return DEFAULT_OWNER_ID;
-  const row = db.prepare("SELECT user_id FROM user_tokens WHERE token = ?").get(token) as
-    | { user_id: string }
-    | undefined;
-  return row?.user_id ?? null;
+  const result = await pool.query<{ user_id: string }>(
+    "SELECT user_id FROM user_tokens WHERE token = $1",
+    [token]
+  );
+  return result.rows[0]?.user_id ?? null;
 }
 
 function mapRow(row: MemoryRow): LongTermMemory {
@@ -271,8 +297,8 @@ function mapRow(row: MemoryRow): LongTermMemory {
     content: row.content,
     keywords,
     status: row.status,
-    evidenceCount: row.evidence_count,
-    confidence: row.confidence,
+    evidenceCount: Number(row.evidence_count),
+    confidence: Number(row.confidence),
     explicit: Boolean(row.explicit),
     sourceSessionId: row.source_session_id,
     createdAt: row.created_at,
@@ -281,70 +307,71 @@ function mapRow(row: MemoryRow): LongTermMemory {
   };
 }
 
-function deactivateConflicts(ownerId: string, item: MemoryCandidate): void {
+async function deactivateConflicts(ownerId: string, item: MemoryCandidate): Promise<void> {
   if (!item.conflictKey) return;
-  db.prepare(
-    `UPDATE long_term_memories
-     SET status = 'forgotten', updated_at = ?
-     WHERE owner_id = ?
-       AND memory_key IN (?, ?)
-       AND memory_key <> ?`
-  ).run(
-    now(),
-    ownerId,
-    `preference:like:${item.conflictKey}`,
-    `preference:dislike:${item.conflictKey}`,
-    item.key
+  await pool.query(
+    `DELETE FROM long_term_memories
+     WHERE owner_id = $1
+       AND memory_key IN ($2, $3)
+       AND memory_key <> $4`,
+    [
+      ownerId,
+      `preference:like:${item.conflictKey}`,
+      `preference:dislike:${item.conflictKey}`,
+      item.key,
+    ]
   );
 }
 
-function upsertCandidate(ownerId: string, sessionId: string, item: MemoryCandidate): LongTermMemory {
+async function upsertCandidate(ownerId: string, sessionId: string, item: MemoryCandidate): Promise<LongTermMemory> {
   const timestamp = now();
-  deactivateConflicts(ownerId, item);
-  db.prepare(
+  await deactivateConflicts(ownerId, item);
+  await pool.query(
     `INSERT INTO long_term_memories (
        owner_id, memory_key, category, content, keywords_json, status,
        evidence_count, confidence, explicit, source_session_id, created_at, updated_at
-     ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
+     ) VALUES ($1, $2, $3, $4, $5, $6, 1, $7, $8, $9, $10, $11)
      ON CONFLICT(owner_id, memory_key) DO UPDATE SET
-       category = excluded.category,
-       content = excluded.content,
-       keywords_json = excluded.keywords_json,
+       category = EXCLUDED.category,
+       content = EXCLUDED.content,
+       keywords_json = EXCLUDED.keywords_json,
        status = CASE
-         WHEN excluded.explicit = 1 OR long_term_memories.evidence_count + 1 >= ? THEN 'active'
+         WHEN EXCLUDED.explicit = 1 OR long_term_memories.evidence_count + 1 >= $12 THEN 'active'
          ELSE 'candidate'
        END,
        evidence_count = long_term_memories.evidence_count + 1,
-       confidence = MIN(1.0, MAX(long_term_memories.confidence, excluded.confidence) + 0.1),
-       explicit = MAX(long_term_memories.explicit, excluded.explicit),
-       source_session_id = excluded.source_session_id,
-       updated_at = excluded.updated_at`
-  ).run(
-    ownerId,
-    item.key,
-    item.category,
-    item.content,
-    JSON.stringify(item.keywords),
-    item.explicit || item.activationThreshold <= 1 ? "active" : "candidate",
-    item.confidence,
-    item.explicit ? 1 : 0,
-    sessionId,
-    timestamp,
-    timestamp,
-    item.activationThreshold
+       confidence = LEAST(1.0, GREATEST(long_term_memories.confidence, EXCLUDED.confidence) + 0.1),
+       explicit = GREATEST(long_term_memories.explicit, EXCLUDED.explicit),
+       source_session_id = EXCLUDED.source_session_id,
+       updated_at = EXCLUDED.updated_at`,
+    [
+      ownerId,
+      item.key,
+      item.category,
+      item.content,
+      JSON.stringify(item.keywords),
+      item.explicit || item.activationThreshold <= 1 ? "active" : "candidate",
+      item.confidence,
+      item.explicit ? 1 : 0,
+      sessionId,
+      timestamp,
+      timestamp,
+      item.activationThreshold,
+    ]
   );
-  const row = db.prepare(
-    "SELECT * FROM long_term_memories WHERE owner_id = ? AND memory_key = ?"
-  ).get(ownerId, item.key) as MemoryRow;
-  return mapRow(row);
+  const result = await pool.query<MemoryRow>(
+    "SELECT * FROM long_term_memories WHERE owner_id = $1 AND memory_key = $2",
+    [ownerId, item.key]
+  );
+  return mapRow(result.rows[0]);
 }
 
-export function forgetMemoriesFromMessage(ownerId: string, input: string): number {
+export async function forgetMemoriesFromMessage(ownerId: string, input: string): Promise<number> {
   const match = input.match(/(?:忘掉|忘记|不要记得|别记得)[，,：:\s]*(.+)$/);
   if (!match) return 0;
   const target = cleanValue(match[1]);
   if (!target) return 0;
-  const rows = listLongTermMemories(ownerId, { includeCandidates: true, includeForgotten: false, limit: 200 });
+  const rows = await listLongTermMemories(ownerId, { includeCandidates: true, limit: 200 });
   const terms = keywordsFor(target);
   const ids = rows
     .filter((memory) =>
@@ -354,54 +381,56 @@ export function forgetMemoriesFromMessage(ownerId: string, input: string): numbe
     )
     .map((memory) => memory.id);
   if (ids.length === 0) return 0;
-  const placeholders = ids.map(() => "?").join(",");
-  const result = db.prepare(
-    `UPDATE long_term_memories SET status = 'forgotten', updated_at = ? WHERE owner_id = ? AND id IN (${placeholders})`
-  ).run(now(), ownerId, ...ids);
-  return result.changes;
+  const placeholders = ids.map((_, i) => `$${i + 2}`).join(",");
+  const result = await pool.query(
+    `DELETE FROM long_term_memories WHERE owner_id = $1 AND id IN (${placeholders})`,
+    [ownerId, ...ids]
+  );
+  return result.rowCount ?? 0;
 }
 
-export function observeLongTermMemories(
+export async function observeLongTermMemories(
   ownerId: string,
   sessionId: string,
   userMessage: string
-): { observed: LongTermMemory[]; activated: LongTermMemory[]; forgotten: number } {
-  const forgotten = forgetMemoriesFromMessage(ownerId, userMessage);
-  if (forgotten > 0) return { observed: [], activated: [], forgotten };
-  const observed = extractMemoryCandidates(userMessage).map((item) =>
-    upsertCandidate(ownerId, sessionId, item)
-  );
+): Promise<{ observed: LongTermMemory[]; activated: LongTermMemory[]; deleted: number }> {
+  const deleted = await forgetMemoriesFromMessage(ownerId, userMessage);
+  if (deleted > 0) return { observed: [], activated: [], deleted };
+  const observed: LongTermMemory[] = [];
+  for (const item of extractMemoryCandidates(userMessage)) {
+    observed.push(await upsertCandidate(ownerId, sessionId, item));
+  }
   return {
     observed,
     activated: observed.filter((memory) => memory.status === "active"),
-    forgotten: 0,
+    deleted: 0,
   };
 }
 
-export function listLongTermMemories(
+export async function listLongTermMemories(
   ownerId: string,
-  options: { includeCandidates?: boolean; includeForgotten?: boolean; limit?: number } = {}
-): LongTermMemory[] {
+  options: { includeCandidates?: boolean; limit?: number } = {}
+): Promise<LongTermMemory[]> {
   const statuses = ["active"];
   if (options.includeCandidates) statuses.push("candidate");
-  if (options.includeForgotten) statuses.push("forgotten");
-  const placeholders = statuses.map(() => "?").join(",");
-  const rows = db.prepare(
+  const placeholders = statuses.map((_, i) => `$${i + 2}`).join(",");
+  const result = await pool.query<MemoryRow>(
     `SELECT * FROM long_term_memories
-     WHERE owner_id = ? AND status IN (${placeholders})
-     ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'candidate' THEN 1 ELSE 2 END,
+     WHERE owner_id = $1 AND status IN (${placeholders})
+     ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END,
               confidence DESC, evidence_count DESC, updated_at DESC
-     LIMIT ?`
-  ).all(ownerId, ...statuses, Math.min(Math.max(options.limit ?? 100, 1), 500)) as MemoryRow[];
-  return rows.map(mapRow);
+     LIMIT $${statuses.length + 2}`,
+    [ownerId, ...statuses, Math.min(Math.max(options.limit ?? 100, 1), 500)]
+  );
+  return result.rows.map(mapRow);
 }
 
-export function recallLongTermMemories(
+export async function recallLongTermMemories(
   ownerId: string,
   query: string,
   limit = 8
-): LongTermMemory[] {
-  const memories = listLongTermMemories(ownerId, { limit: 200 });
+): Promise<LongTermMemory[]> {
+  const memories = await listLongTermMemories(ownerId, { limit: 200 });
   const normalizedQuery = query.toLowerCase();
   const queryKeywords = keywordsFor(query);
   const metaRecall = META_RECALL_PATTERN.test(query);
@@ -422,39 +451,43 @@ export function recallLongTermMemories(
   if (recalled.length > 0) {
     const timestamp = now();
     const ids = recalled.map((memory) => memory.id);
-    const placeholders = ids.map(() => "?").join(",");
-    db.prepare(
-      `UPDATE long_term_memories SET last_recalled_at = ? WHERE owner_id = ? AND id IN (${placeholders})`
-    ).run(timestamp, ownerId, ...ids);
+    const placeholders = ids.map((_, i) => `$${i + 3}`).join(",");
+    await pool.query(
+      `UPDATE long_term_memories SET last_recalled_at = $1 WHERE owner_id = $2 AND id IN (${placeholders})`,
+      [timestamp, ownerId, ...ids]
+    );
   }
   return recalled;
 }
 
-export function forgetLongTermMemory(ownerId: string, memoryId: number): boolean {
-  const result = db.prepare(
-    "UPDATE long_term_memories SET status = 'forgotten', updated_at = ? WHERE owner_id = ? AND id = ?"
-  ).run(now(), ownerId, memoryId);
-  return result.changes > 0;
+export async function forgetLongTermMemory(ownerId: string, memoryId: number): Promise<boolean> {
+  const result = await pool.query(
+    "DELETE FROM long_term_memories WHERE owner_id = $1 AND id = $2",
+    [ownerId, memoryId]
+  );
+  return (result.rowCount ?? 0) > 0;
 }
 
-export function clearLongTermMemories(ownerId: string): number {
-  const result = db.prepare("DELETE FROM long_term_memories WHERE owner_id = ?").run(ownerId);
-  return result.changes;
+export async function clearLongTermMemories(ownerId: string): Promise<number> {
+  const result = await pool.query(
+    "DELETE FROM long_term_memories WHERE owner_id = $1",
+    [ownerId]
+  );
+  return result.rowCount ?? 0;
 }
 
-export function getLongTermMemoryStats(ownerId: string): {
+export async function getLongTermMemoryStats(ownerId: string): Promise<{
   active: number;
   candidates: number;
-  forgotten: number;
-} {
-  const rows = db.prepare(
-    "SELECT status, COUNT(*) AS count FROM long_term_memories WHERE owner_id = ? GROUP BY status"
-  ).all(ownerId) as Array<{ status: LongTermMemoryStatus; count: number }>;
-  const counts = { active: 0, candidates: 0, forgotten: 0 };
-  for (const row of rows) {
-    if (row.status === "active") counts.active = row.count;
-    else if (row.status === "candidate") counts.candidates = row.count;
-    else counts.forgotten = row.count;
+}> {
+  const result = await pool.query<{ status: LongTermMemoryStatus; count: number }>(
+    "SELECT status, COUNT(*) AS count FROM long_term_memories WHERE owner_id = $1 GROUP BY status",
+    [ownerId]
+  );
+  const counts = { active: 0, candidates: 0 };
+  for (const row of result.rows) {
+    if (row.status === "active") counts.active = Number(row.count);
+    else if (row.status === "candidate") counts.candidates = Number(row.count);
   }
   return counts;
 }

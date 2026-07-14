@@ -33,15 +33,13 @@ export const fitnessRoute = new Hono();
 // ── 类型推断辅助 ───────────────────────────────────────────────
 
 function ownerFrom(c: any): string {
-  // 从认证上下文获取 ownerId，目前使用默认值
-  // 后续接入用户认证后可从 c.get("userId") 获取
   return c.get("userId") ?? "local-default";
 }
 
 // ── 健身档案 ───────────────────────────────────────────────────
 
-fitnessRoute.get("/profile", (c) => {
-  const profile = getFitnessProfile(ownerFrom(c));
+fitnessRoute.get("/profile", async (c) => {
+  const profile = await getFitnessProfile(ownerFrom(c));
   if (!profile) return c.json({ error: "未设置健身档案" }, 404);
   return c.json(profile);
 });
@@ -56,7 +54,7 @@ fitnessRoute.post("/profile", async (c) => {
     calorieTarget?: number;
   }>();
 
-  const profile = upsertFitnessProfile(ownerFrom(c), body);
+  const profile = await upsertFitnessProfile(ownerFrom(c), body);
   return c.json(profile);
 });
 
@@ -77,7 +75,7 @@ fitnessRoute.post("/meals", async (c) => {
     return c.json({ error: "缺少必填字段：date, mealType, foodName, calories" }, 400);
   }
 
-  const meal = addMeal(
+  const meal = await addMeal(
     ownerFrom(c),
     body.date,
     body.mealType,
@@ -90,16 +88,16 @@ fitnessRoute.post("/meals", async (c) => {
   return c.json(meal, 201);
 });
 
-fitnessRoute.get("/meals", (c) => {
+fitnessRoute.get("/meals", async (c) => {
   const date = c.req.query("date") ?? new Date().toISOString().slice(0, 10);
-  const meals = getMeals(ownerFrom(c), date);
+  const meals = await getMeals(ownerFrom(c), date);
   return c.json(meals);
 });
 
-fitnessRoute.delete("/meals/:id", (c) => {
+fitnessRoute.delete("/meals/:id", async (c) => {
   const id = Number(c.req.param("id"));
   if (isNaN(id)) return c.json({ error: "无效的 meal ID" }, 400);
-  const deleted = deleteMeal(id, ownerFrom(c));
+  const deleted = await deleteMeal(id, ownerFrom(c));
   if (!deleted) return c.json({ error: "记录不存在或无权操作" }, 404);
   return c.json({ success: true });
 });
@@ -119,7 +117,7 @@ fitnessRoute.post("/workouts", async (c) => {
     return c.json({ error: "缺少必填字段：date, type, durationMinutes" }, 400);
   }
 
-  const workout = addWorkout(
+  const workout = await addWorkout(
     ownerFrom(c),
     body.date,
     body.type,
@@ -130,16 +128,16 @@ fitnessRoute.post("/workouts", async (c) => {
   return c.json(workout, 201);
 });
 
-fitnessRoute.get("/workouts", (c) => {
+fitnessRoute.get("/workouts", async (c) => {
   const date = c.req.query("date") ?? new Date().toISOString().slice(0, 10);
-  const workouts = getWorkouts(ownerFrom(c), date);
+  const workouts = await getWorkouts(ownerFrom(c), date);
   return c.json(workouts);
 });
 
-fitnessRoute.delete("/workouts/:id", (c) => {
+fitnessRoute.delete("/workouts/:id", async (c) => {
   const id = Number(c.req.param("id"));
   if (isNaN(id)) return c.json({ error: "无效的 workout ID" }, 400);
-  const deleted = deleteWorkout(id, ownerFrom(c));
+  const deleted = await deleteWorkout(id, ownerFrom(c));
   if (!deleted) return c.json({ error: "记录不存在或无权操作" }, 404);
   return c.json({ success: true });
 });
@@ -151,7 +149,7 @@ fitnessRoute.post("/hydration", async (c) => {
   if (!body.date || !body.waterMl) {
     return c.json({ error: "缺少必填字段：date, waterMl" }, 400);
   }
-  const log = updateHydration(ownerFrom(c), body.date, body.waterMl);
+  const log = await updateHydration(ownerFrom(c), body.date, body.waterMl);
   return c.json(log);
 });
 
@@ -160,28 +158,28 @@ fitnessRoute.post("/sleep", async (c) => {
   if (!body.date || !body.sleepHours) {
     return c.json({ error: "缺少必填字段：date, sleepHours" }, 400);
   }
-  const log = updateSleep(ownerFrom(c), body.date, body.sleepHours);
+  const log = await updateSleep(ownerFrom(c), body.date, body.sleepHours);
   return c.json(log);
 });
 
 // ── 每日日志 ───────────────────────────────────────────────────
 
-fitnessRoute.get("/daily", (c) => {
+fitnessRoute.get("/daily", async (c) => {
   const date = c.req.query("date") ?? new Date().toISOString().slice(0, 10);
-  const log = getDailyLog(ownerFrom(c), date);
+  const log = await getDailyLog(ownerFrom(c), date);
   if (!log) return c.json({ error: "当日无记录" }, 404);
   return c.json(log);
 });
 
-fitnessRoute.get("/summary", (c) => {
+fitnessRoute.get("/summary", async (c) => {
   const date = c.req.query("date") ?? new Date().toISOString().slice(0, 10);
-  const summary = getDailySummary(ownerFrom(c), date);
+  const summary = await getDailySummary(ownerFrom(c), date);
   if (!summary) return c.json({ error: "当日无记录" }, 404);
   return c.json(summary);
 });
 
-fitnessRoute.get("/weekly", (c) => {
-  const trend = getWeeklyTrend(ownerFrom(c));
+fitnessRoute.get("/weekly", async (c) => {
+  const trend = await getWeeklyTrend(ownerFrom(c));
   return c.json(trend);
 });
 
@@ -190,7 +188,7 @@ fitnessRoute.post("/notes", async (c) => {
   if (!body.date || body.notes === undefined) {
     return c.json({ error: "缺少必填字段：date, notes" }, 400);
   }
-  updateDailyNotes(ownerFrom(c), body.date, body.notes);
+  await updateDailyNotes(ownerFrom(c), body.date, body.notes);
   return c.json({ success: true });
 });
 

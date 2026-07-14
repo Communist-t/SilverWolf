@@ -20,8 +20,9 @@ async function runCli(): Promise<void> {
     return;
   }
 
-  const { closeDatabase } = await import("./db/conversation-store.js");
+  const { closeDatabase, initDatabase } = await import("./db/conversation-store.js");
   try {
+    await initDatabase();
     const { clearSession, sendMessage } = await import("./agent/chat-agent.js");
     const sessionId = process.env.SESSION_ID ?? "cli";
     const rl = createInterface({ input, output });
@@ -53,7 +54,7 @@ async function runCli(): Promise<void> {
         }
 
         if (["clear", "reset", "清空"].includes(message.toLowerCase())) {
-          clearSession(sessionId);
+          await clearSession(sessionId);
           console.log("银狼> 存档清掉了。别后悔，玩家。");
           continue;
         }
@@ -81,7 +82,7 @@ async function runCli(): Promise<void> {
       rl.close();
     }
   } finally {
-    closeDatabase();
+    await closeDatabase();
   }
 }
 
