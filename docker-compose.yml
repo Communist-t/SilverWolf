@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: silver-wolf-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: silverwolf
+      POSTGRES_PASSWORD: silverwolf_dev_2026
+      POSTGRES_DB: silver_wolf_agent
+      TZ: Asia/Shanghai
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U silverwolf -d silver_wolf_agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: silver-wolf-backend
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: production
+      # 容器内需监听 0.0.0.0 才能被外部访问
+      HOST: 0.0.0.0
+      # 覆盖 .env 中的 DATABASE_URL，容器内通过服务名 postgres 连接数据库
+      DATABASE_URL: postgres://silverwolf:silverwolf_dev_2026@postgres:5432/silver_wolf_agent
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    container_name: silver-wolf-frontend
+    restart: unless-stopped
+    environment:
+      API_BASE: ${API_BASE:-http://localhost:3000}
+      FRONTEND_BASE: ${FRONTEND_BASE:-}
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+volumes:
+  pg_data:
+    driver: local

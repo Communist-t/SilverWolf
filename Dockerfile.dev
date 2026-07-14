@@ -1,0 +1,37 @@
+# ── 开发模式 Dockerfile ──
+# 使用 nodemon + tsx 实现后端热更新，源码通过 volume 挂载
+# nodemon 原生支持 polling，解决 Windows Docker bind mount 不触发 inotify 的问题
+
+FROM node:20-alpine
+
+WORKDIR /app
+
+# 先安装依赖（利用 Docker 缓存层）
+COPY package.json package-lock.json* ./
+RUN npm install
+
+# 安装 nodemon（全局安装避免与项目依赖冲突）
+RUN npm install -g nodemon
+
+# 源码通过 volume 挂载，不在此 COPY
+# 只拷贝运行时需要的非 TS 资源
+COPY db/ ./db/
+COPY data/ ./data/
+
+# nodemon 配置：轮询模式，监听 src/ 和 skills/ 目录
+COPY <<EOF /app/nodemon.json
+{
+  "watch": ["src/", "skills/"],
+  "ext": "ts,js,json",
+  "exec": "npx tsx src/index.ts",
+  "legacyWatch": true,
+  "pollingInterval": 2000
+}
+EOF
+
+ENV NODE_ENV=development
+
+EXPOSE 3000
+
+# 使用 nodemon 启动，legacyWatch 启用轮询模式
+CMD ["nodemon"]

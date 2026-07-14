@@ -1,0 +1,10 @@
+# Dockerignore — 排除不需要的文件
+node_modules
+dist
+.git
+.claude
+.codex-run
+*.log
+*.db
+*.sqlite
+db/*.sqlite

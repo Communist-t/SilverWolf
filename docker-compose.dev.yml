@@ -1,0 +1,80 @@
+# ── 开发模式 Docker Compose ──
+# 用法：docker compose -f docker-compose.dev.yml up
+#
+# 特性：
+#   - 后端：tsx --watch 监听代码变更自动重启
+#   - 前端：volume 挂载 public/ 目录，修改即生效（刷新浏览器）
+#   - 数据库：与生产模式一致，数据持久化到 pg_data 卷
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: silver-wolf-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: silverwolf
+      POSTGRES_PASSWORD: silverwolf_dev_2026
+      POSTGRES_DB: silver_wolf_agent
+      TZ: Asia/Shanghai
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - ./db/init.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U silverwolf -d silver_wolf_agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: silver-wolf-backend-dev
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      # 容器内通过服务名 postgres 连接数据库
+      DATABASE_URL: postgres://silverwolf:silverwolf_dev_2026@postgres:5432/silver_wolf_agent
+    ports:
+      - "3000:3000"
+    volumes:
+      # 挂载源码实现热更新
+      - ./src:/app/src:ro
+      - ./skills:/app/skills:ro
+      - ./db:/app/db:ro
+      - ./data:/app/data:ro
+      # 不挂载 node_modules，使用容器内安装的
+      - backend_node_modules:/app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    image: nginx:alpine
+    container_name: silver-wolf-frontend-dev
+    restart: unless-stopped
+    environment:
+      API_BASE: ${API_BASE:-http://localhost:3000}
+      FRONTEND_BASE: ${FRONTEND_BASE:-}
+    ports:
+      - "8080:80"
+    volumes:
+      # 挂载前端静态资源，修改即生效
+      # 不能用 :ro，因为 docker-entrypoint.sh 需要写入 config.js
+      - ./public:/usr/share/nginx/html
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./frontend/docker-entrypoint.sh:/docker-entrypoint.sh:ro
+    entrypoint: ["/docker-entrypoint.sh"]
+    depends_on:
+      - backend
+
+volumes:
+  pg_data:
+    driver: local
+  backend_node_modules:
+    driver: local
