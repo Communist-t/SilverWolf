@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>银狼 Live2D 控制台</title>
+<style>
+  :root{
+    --ink:#1a2233; --ink2:#33415c; --muted:#6b7488; --faint:#9aa4b6;
+    --panel:#ffffff; --canvas:#eef1f6; --line:#dfe5ee; --teal:#0e7c86;
+    --teal-d:#0a5f67; --violet:#7c3aed;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:var(--canvas); color:var(--ink);
+    font-family:"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+    min-height:100vh; padding:28px 20px 40px;
+  }
+  .wrap{max-width:1080px; margin:0 auto;}
+  header{display:flex; align-items:baseline; justify-content:space-between; flex-wrap:wrap; gap:10px; margin-bottom:18px;}
+  header h1{font-size:22px; letter-spacing:-.01em;}
+  header .hint{color:var(--muted); font-size:13px;}
+  .status{font-size:12px; color:var(--teal); font-weight:600;}
+  .status::before{content:"●"; margin-right:6px;}
+  .layout{display:grid; grid-template-columns: 440px 1fr; gap:18px; align-items:start;}
+  .preview-panel{background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px; position:sticky; top:16px;}
+  #live2d-preview{width:100%; height:460px; border-radius:10px; background:
+    radial-gradient(120% 120% at 50% 10%, #fbfcff 0%, #e8eef8 55%, #dce6f5 100%);
+  }
+  .preview-foot{margin-top:10px; color:var(--muted); font-size:12px; text-align:center;}
+  .controls{display:flex; flex-direction:column; gap:16px;}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 18px;}
+  .card h3{font-size:14px; margin-bottom:12px; color:var(--ink2); display:flex; align-items:center; gap:8px;}
+  .card h3 .tag{font-size:11px; color:var(--teal); font-weight:600;}
+  .expr-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(86px,1fr)); gap:8px;}
+  .expr-grid button{
+    border:1px solid var(--line); background:#fff; border-radius:8px; padding:7px 4px;
+    font-size:12.5px; cursor:pointer; color:var(--ink2); transition:.12s;
+  }
+  .expr-grid button:hover{border-color:var(--teal); color:var(--teal-d);}
+  .expr-grid button.active{background:var(--teal); border-color:var(--teal); color:#fff;}
+  .motion-row{display:flex; flex-wrap:wrap; gap:8px;}
+  .motion-row button{
+    border:1px solid var(--line); background:#fff; border-radius:8px; padding:8px 14px;
+    font-size:12.5px; cursor:pointer; color:var(--ink2); transition:.12s;
+  }
+  .motion-row button:hover{border-color:var(--violet); color:var(--violet);}
+  .slider-group{display:flex; flex-direction:column; gap:12px;}
+  .slider-row{display:flex; align-items:center; gap:12px;}
+  .slider-row label{width:56px; font-size:12.5px; color:var(--muted); flex-shrink:0;}
+  .slider-row input[type=range]{flex:1;}
+  .slider-row output{width:52px; text-align:right; font-size:12px; color:var(--ink2); font-variant-numeric:tabular-nums;}
+  .reset-btn{
+    margin-top:4px; border:1px solid var(--line); background:#fff; border-radius:8px;
+    padding:10px 0; font-size:13px; cursor:pointer; color:var(--ink2); transition:.12s;
+  }
+  .reset-btn:hover{border-color:var(--teal); color:var(--teal-d);}
+  @media(max-width:900px){
+    .layout{grid-template-columns:1fr;}
+    #live2d-preview{height:380px;}
+    .preview-panel{position:static;}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1>银狼 Live2D 控制台</h1>
+      <div class="hint">在此调整角色立绘的表情、动作、缩放与位置，实时联动主页面</div>
+    </div>
+    <span id="status" class="status">连接中</span>
+  </header>
+
+  <div class="layout">
+    <div class="preview-panel">
+      <div id="live2d-preview"></div>
+      <div class="preview-foot">预览区 · 控制会通过 BroadcastChannel 同步到主页面</div>
+    </div>
+
+    <div class="controls">
+      <div class="card">
+        <h3>表情 <span class="tag">14 种</span></h3>
+        <div id="exprList" class="expr-grid"></div>
+      </div>
+
+      <div class="card">
+        <h3>动作 <span class="tag">3 个</span></h3>
+        <div id="motionList" class="motion-row"></div>
+      </div>
+
+      <div class="card">
+        <h3>显示</h3>
+        <div class="slider-group">
+          <div class="slider-row"><label>缩放</label><input id="scaleInput" type="range" min="0.5" max="1.6" step="0.02" value="1"><output id="scaleOut">100%</output></div>
+          <div class="slider-row"><label>水平</label><input id="xInput" type="range" min="-120" max="120" step="2" value="0"><output id="xOut">0</output></div>
+          <div class="slider-row"><label>垂直</label><input id="yInput" type="range" min="-120" max="120" step="2" value="0"><output id="yOut">0</output></div>
+        </div>
+        <button id="resetBtn" class="reset-btn" type="button">重置到自动适配</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/vendor/live2d/pixi.min.js"></script>
+<script src="/vendor/live2d/live2dcubismcore.min.js"></script>
+<script src="/vendor/live2d/pixi-live2d-display.cubism4.min.js"></script>
+<script src="/scripts/live2d-ctrl.js"></script>
+<script>
+(function(){
+  var EXPRS = ["黑脸","脸红爱心","生气","晕","＞＜","0.0","星星眼","流泪","吹泡泡","外套关闭","抱胸手","捧心手","要饭手","月卡"];
+  var MOTIONS = [
+    { label:"变身 1",   group:"TapBody", index:0 },
+    { label:"变身 2",   group:"TapBody", index:1 },
+    { label:"睡觉",     group:"TapBody", index:2 }
+  ];
+  var app = window.Live2DApp;
+  var exprBtns = {};
+
+  function byId(id){ return document.getElementById(id); }
+
+  function buildExpressions(){
+    var box = byId("exprList");
+    EXPRS.forEach(function(name){
+      var b = document.createElement("button");
+      b.type = "button"; b.textContent = name;
+      b.onclick = function(){
+        clearActive();
+        b.classList.add("active");
+        app.setExpression(name);
+        app.send({ type:"expr", value:name });
+      };
+      box.appendChild(b);
+      exprBtns[name] = b;
+    });
+  }
+  function clearActive(){
+    EXPRS.forEach(function(n){ exprBtns[n] && exprBtns[n].classList.remove("active"); });
+  }
+  function buildMotions(){
+    var box = byId("motionList");
+    MOTIONS.forEach(function(m){
+      var b = document.createElement("button");
+      b.type = "button"; b.textContent = m.label;
+      b.onclick = function(){
+        app.playMotion(m.group, m.index);
+        app.send({ type:"motion", group:m.group, index:m.index });
+      };
+      box.appendChild(b);
+    });
+    var stop = document.createElement("button");
+    stop.type = "button";
+    stop.textContent = "停止当前动作";
+    stop.style.borderColor = "#d33";
+    stop.style.color = "#d33";
+    stop.onclick = function () {
+      app.stopAll();
+      app.send({ type:"stopAll" });
+      clearActive();
+    };
+    box.appendChild(stop);
+  }
+  function bindSliders(){
+    var s = byId("scaleInput"), so = byId("scaleOut");
+    s.oninput = function(){
+      var v = parseFloat(s.value);
+      so.textContent = Math.round(v*100) + "%";
+      app.setScaleMul(v);
+      app.send({ type:"scaleMul", value:v });
+    };
+    var x = byId("xInput"), xo = byId("xOut");
+    x.oninput = function(){
+      xo.textContent = x.value;
+      app.setOffset(parseInt(x.value,10), parseInt(byId("yInput").value,10));
+      app.send({ type:"offset", x:parseInt(x.value,10), y:parseInt(byId("yInput").value,10) });
+    };
+    var y = byId("yInput"), yo = byId("yOut");
+    y.oninput = function(){
+      yo.textContent = y.value;
+      app.setOffset(parseInt(byId("xInput").value,10), parseInt(y.value,10));
+      app.send({ type:"offset", x:parseInt(byId("xInput").value,10), y:parseInt(y.value,10) });
+    };
+    byId("resetBtn").onclick = function(){
+      s.value = 1; so.textContent = "100%";
+      x.value = 0; xo.textContent = "0";
+      y.value = 0; yo.textContent = "0";
+      app.reset();
+      app.send({ type:"reset" });
+    };
+  }
+
+  document.addEventListener("DOMContentLoaded", function(){
+    buildExpressions();
+    buildMotions();
+    bindSliders();
+    var st = byId("status");
+    app.onReady = function(){
+      st.textContent = "已连接 · 模型就绪"; st.style.color = "#0e7c86";
+      /* 同步滑杆到上次记忆的缩放/位移 */
+      if (app._state) {
+        var si = byId("scaleInput"), so = byId("scaleOut");
+        if (si) { si.value = app._state.scaleMul != null ? app._state.scaleMul : 1; so.textContent = Math.round(si.value * 100) + "%"; }
+        var xi = byId("xInput"), yi = byId("yInput"), xo = byId("xOut"), yo = byId("yOut");
+        if (xi) { xi.value = app._state.offsetX || 0; }
+        if (yi) { yi.value = app._state.offsetY || 0; }
+        if (xo) { xo.textContent = app._state.offsetX || 0; }
+        if (yo) { yo.textContent = app._state.offsetY || 0; }
+      }
+    };
+    app.init("live2d-preview", { idle:true, autoInteract:true }).then(function(ok){
+      if(!ok){ st.textContent = "模型加载失败"; st.style.color = "#dc2626"; }
+    });
+  });
+})();
+</script>
+</body>
+</html>

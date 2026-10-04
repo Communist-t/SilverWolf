@@ -1,0 +1,57 @@
+{
+	"Version": 3,
+	"FileReferences": {
+		"Moc": "银狼.moc3",
+		"Textures": [
+			"银狼.4096/texture_00.png?v=12",
+			"银狼.4096/texture_01.png?v=12",
+			"银狼.4096/texture_02.png?v=12",
+			"银狼.4096/texture_03.png?v=12",
+			"银狼.4096/texture_04.png?v=12"
+		],
+		"Physics": "银狼.physics3.json",
+		"DisplayInfo": "银狼.cdi3.json",
+		"Expressions": [
+			{ "Name": "黑脸", "File": "Expressions/01黑脸.exp3.json" },
+			{ "Name": "脸红爱心", "File": "Expressions/02 脸红爱心.exp3.json" },
+			{ "Name": "生气", "File": "Expressions/03 生气.exp3.json" },
+			{ "Name": "晕", "File": "Expressions/04 晕.exp3.json" },
+			{ "Name": "＞＜", "File": "Expressions/05 ＞＜.exp3.json" },
+			{ "Name": "0.0", "File": "Expressions/06 0.0.exp3.json" },
+			{ "Name": "星星眼", "File": "Expressions/07 星星眼.exp3.json" },
+			{ "Name": "流泪", "File": "Expressions/08 流泪.exp3.json" },
+			{ "Name": "吹泡泡", "File": "Expressions/10 吹泡泡.exp3.json" },
+			{ "Name": "外套关闭", "File": "Expressions/11 外套关闭.exp3.json" },
+			{ "Name": "抱胸手", "File": "Expressions/12 抱胸手.exp3.json" },
+			{ "Name": "捧心手", "File": "Expressions/13 捧心手.exp3.json" },
+			{ "Name": "要饭手", "File": "Expressions/14 要饭手.exp3.json" },
+			{ "Name": "月卡", "File": "Expressions/月卡.exp3.json" },
+			{ "Name": "水印", "File": "Expressions/水印.exp3.json" }
+		],
+		"Motions": {
+			"Idle": [
+				{ "File": "Motions/循环动画.motion3.json" }
+			],
+			"TapBody": [
+				{ "File": "Motions/变身动画1.motion3.json" },
+				{ "File": "Motions/变身动画2.motion3.json" },
+				{ "File": "Motions/睡觉动画.motion3.json" }
+			]
+		}
+	},
+	"Groups": [
+		{
+			"Target": "Parameter",
+			"Name": "EyeBlink",
+			"Ids": [
+				"ParamEyeLOpen",
+				"ParamEyeROpen"
+			]
+		},
+		{
+			"Target": "Parameter",
+			"Name": "LipSync",
+			"Ids": []
+		}
+	]
+}
