@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, scryptSync, timingSafeEqual } from "node:crypto";
 
 const KEY_LENGTH = 64;
 const SALT_LENGTH = 32;
@@ -29,6 +29,14 @@ export function verifyPassword(password: string, stored: string): boolean {
 
 export function generateToken(): string {
   return randomBytes(32).toString("hex");
+}
+
+/**
+ * 计算登录令牌的 SHA-256 哈希。
+ * 数据库只存储哈希值（而非明文）：即使数据库泄露，令牌也无法被直接使用。
+ */
+export function hashToken(token: string): string {
+  return createHash("sha256").update(token, "utf8").digest("hex");
 }
 
 export function generateVerificationCode(): string {

@@ -45,8 +45,8 @@ async function startServer(): Promise<void> {
   }
 
   let startupModel = {
-    model: config.llm.model,
-    baseURL: config.llm.baseURL,
+    model: "未配置",
+    baseURL: "",
   };
   try {
     const { getActiveLlmModelConfig } = await import("./llm/model-configs.js");

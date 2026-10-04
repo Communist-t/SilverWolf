@@ -37,7 +37,7 @@ memoryRoute.delete("/:memoryId", async (c) => {
     return c.json({ error: "记忆 ID 无效" }, 400);
   }
   return (await forgetLongTermMemory(ownerId, memoryId))
-    ? c.json({ ok: true, memoryId })
+    ? c.json({ ok: true, memory: { deleted: 1, memoryId } })
     : c.json({ error: "记忆不存在" }, 404);
 });
 

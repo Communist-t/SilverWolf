@@ -17,20 +17,23 @@ import {
   listMessagesForSummary,
   saveToolRun,
   saveConversationTurn,
+  type ProcessStep,
   upsertSessionSummary,
 } from "../db/conversation-store.js";
 import {
   observeLongTermMemories,
   recallLongTermMemories,
 } from "./long-term-memory.js";
-import { chat, chatStream, type ChatParams } from "../llm/client.js";
+import { chat, chatStream, chatWithTools, type ChatParams } from "../llm/client.js";
+import { getActiveLlmModelConfig, modelSupportsVision } from "../llm/model-configs.js";
 import type { LlmModelConfig } from "../llm/model-configs.js";
 import { logger } from "../logger.js";
-import { decideTools } from "../tools/tool-router.js";
+import { decideTools, hasSemanticSearchSignal } from "../tools/tool-router.js";
+import { executeSkill, buildSkillTools } from "../tools/skill-executor.js";
 import { searchWeb, type WebSearchResult } from "../tools/web-search.js";
 import { searchWeather } from "../tools/weather-skill.js";
 import { isRelevantWebResult } from "../tools/result-relevance.js";
-import { searchTechnologyNews } from "../tools/skill-manager.js";
+import { searchTechnologyNews, listSkills } from "../tools/skill-manager.js";
 import {
   extractConversationContext,
   type ConversationContext,
@@ -42,6 +45,39 @@ import { serializeUntrustedSearchResults } from "../utils/prompt-data.js";
 
 const RECENT_CONTEXT_MESSAGES = 100;
 const COMPRESSION_THRESHOLD_MESSAGES = 120;
+/** 距离上次压缩至少新增这么多条消息才再次压缩，避免每轮都调用摘要 LLM */
+const MIN_SUMMARY_BATCH_MESSAGES = 8;
+/** 技能工具决策的最大轮数（含首次决策后回传） */
+const MAX_SKILL_TOOL_ROUNDS = 3;
+
+/** 预判玩家消息是否可能触发技能主动调用（命中才进入 function calling 决策，避免每轮多一次 LLM 调用） */
+function mayInvokeSkill(input: string): boolean {
+  // 文件写入 / 文档生成类（md / docx / pptx / pdf / word / 报告 / 演示等）
+  if (
+    /写.{0,12}(md|markdown|txt|docx|pptx|pdf|ppt|word|文件|文档|报告|演示|文稿|笔记)/i.test(input) ||
+    /生成.{0,8}(文件|文档|md|markdown|docx|pptx|pdf|ppt|word|报告|演示|文稿|笔记)/i.test(input) ||
+    /创建.{0,8}(文件|文档|md|markdown|docx|pptx|pdf|ppt|word|报告|演示|文稿)/i.test(input) ||
+    /做(一个|一份|个|份)?\s*(ppt|pptx|pdf|docx|word|md|markdown|文档|报告|演示文稿|演示)/i.test(input) ||
+    /保存.{0,10}(文件|md|markdown|docx|pptx|pdf|ppt|word|文档|报告)/i.test(input) ||
+    /导出.{0,8}(文件|md|markdown|docx|pptx|pdf|ppt|word|报告)/i.test(input)
+  ) {
+    return true;
+  }
+  // 明确要求调用 / 使用技能
+  if (/(调用|使用|用|会).{0,6}(技能|插件)/i.test(input)) {
+    return true;
+  }
+  // 明确查询类请求（搜索 / 天气 / 新闻 / 价格 / 评测等）；
+  // 工具决策时会排除已被规则前置执行的同名技能，避免重复联网
+  if (
+    /(帮我|请|你)?(搜|查|找|看)(一下|一遍|一)?(资料|信息|价格|论文|新闻|热点|资讯|天气|气温|温度|多少度|评测|推荐)/i.test(input) ||
+    /(天气|气温|温度|多少度|新闻|热点|头条|资讯|热搜|多少钱|评测)/i.test(input) ||
+    hasSemanticSearchSignal(input)
+  ) {
+    return true;
+  }
+  return false;
+}
 
 export type ChatEvent =
   | {
@@ -140,6 +176,12 @@ async function compressSessionContextIfNeeded(
     return;
   }
 
+  // 增量摘要批量太小（如每轮只滚出 2 条）时不值得调用一次 LLM；
+  // 等积攒到足够批量再压缩，避免阈值之后每轮对话都额外等待一次摘要调用。
+  if (messagesToSummarize.length < MIN_SUMMARY_BATCH_MESSAGES) {
+    return;
+  }
+
   const transcript = messagesToSummarize
     .map((message) => {
       const speaker = message.role === "user" ? "玩家" : "银狼";
@@ -152,6 +194,8 @@ async function compressSessionContextIfNeeded(
     temperature: 0.2,
     maxTokens: 900,
     signal,
+    // 压缩属于后台维护任务：失败可以跳过本轮，不值得占用玩家响应时间重试
+    maxRetries: 0,
     messages: [
       {
         role: "system",
@@ -175,6 +219,7 @@ export interface SendMessageResult {
     recalled: number;
     activated: number;
     candidates: number;
+    deleted?: number;
   };
   webSearch?: {
     used: boolean;
@@ -216,10 +261,17 @@ export interface SendMessageCoreOptions {
   attachments?: AttachmentData[];
 }
 
+/** 收集当前对话轮次发出的 step 日志，用于持久化"查看过程"（按请求隔离，避免并发串扰） */
+type StepCollector = ProcessStep[];
+
 async function emitEvent(
+  steps: StepCollector,
   onEvent: ChatEventHandler | undefined,
   event: ChatEvent
 ): Promise<void> {
+  if (event.type === "step") {
+    steps.push({ name: event.name, content: event.content });
+  }
   if (onEvent) {
     await onEvent(event);
   }
@@ -242,19 +294,31 @@ function toolRunTtlMs(intent: string): number {
 function isToolStatusFollowUp(input: string): boolean {
   return (
     /(?:为什么|为啥|怎么|咋|原因|有时|有时候|偶尔).*(?:查不出|查不到|没查到|查询失败|搜索失败|能查|查出来)/i.test(input) ||
-    /(?:刚才|上次|之前).*(?:查询|搜索|联网|天气).*(?:成功|失败|结果|怎么回事)/i.test(input)
+    /(?:刚才|上次|之前).*(?:查询|搜索|联网|天气).*(?:成功|失败|结果|怎么回事)/i.test(input) ||
+    /(?:查询|搜索|查找|找到|搜到|查到|查一下).{0,4}(?:到了没|了吗|到了吗|了没|没有|结果|结果呢|咋样|怎么样)/i.test(input)
   );
 }
 
 function buildToolStatusReply(
-  latestToolRun: Awaited<ReturnType<typeof getLatestToolRun<WebSearchResult>>>
+  latestToolRun: Awaited<ReturnType<typeof getLatestToolRun<WebSearchResult>>>,
+  options?: { noCurrentSearch?: boolean }
 ): string {
+  if (options?.noCurrentSearch) {
+    return latestToolRun
+      ? `你刚才这条消息没有触发真实联网查询，所以没有新的搜索结果；此前最近一次联网是「${latestToolRun.query}」，但那不是本次追问的结果。要我针对你想查的内容重新联网查一次吗？`
+      : `你刚才这条消息没有触发真实联网查询，所以没有新的搜索结果（这段会话里也没有更早的联网记录）。要我针对你想查的内容联网查一次吗？`;
+  }
   if (!latestToolRun) {
     return "这段会话里没有可读取的联网记录，所以我不能硬猜上次到底卡在哪。重新发一次明确的查询，我会把成功、无结果还是报错分开显示。";
   }
 
   if (latestToolRun.status === "success") {
-    return `刚才那次其实查成功了：通过 ${latestToolRun.provider} 拿到 ${latestToolRun.results.length} 条可用结果。偶尔查不到通常有三种情况：问题没触发联网、地点或关键词不完整、查询完成但过滤后没有可靠结果；只有记录了具体错误时才算接口失败。`;
+    const topResults = latestToolRun.results
+      .slice(0, 3)
+      .map((result) => `- ${result.title}${result.url ? `\n  ${result.url}` : ""}`)
+      .join("\n");
+    const topText = topResults ? `\n\n为你摘出前几条：\n${topResults}` : "";
+    return `刚才那次其实查成功了：通过 ${latestToolRun.provider} 拿到 ${latestToolRun.results.length} 条可用结果。${topText}\n\n偶尔查不到通常有三种情况：问题没触发联网、地点或关键词不完整、查询完成但过滤后没有可靠结果；只有记录了具体错误时才算接口失败。`;
   }
 
   if (latestToolRun.status === "empty") {
@@ -310,12 +374,14 @@ export async function sendMessageCore({
   attachments,
 }: SendMessageCoreOptions): Promise<SendMessageResult> {
   signal?.throwIfAborted();
+  // 每轮对话从空开始收集过程日志（按请求独立，多请求并发不互相污染）
+  const steps: StepCollector = [];
   const trimmedMessage = message.trim();
   if (!trimmedMessage) {
     throw new Error("消息不能为空。");
   }
 
-  await emitEvent(onEvent, {
+  await emitEvent(steps, onEvent, {
     type: "step",
     name: "input",
     content: `收到玩家消息，sessionId=${sessionId}`,
@@ -323,7 +389,7 @@ export async function sendMessageCore({
 
   // 1. RAG 检索
   const { knowledge, fewShots } = retrieveRelevantContext(trimmedMessage);
-  await emitEvent(onEvent, {
+  await emitEvent(steps, onEvent, {
     type: "step",
     name: "rag",
     content: `本地知识 ${knowledge.length} 条，Few-shot ${fewShots.length} 条`,
@@ -335,7 +401,7 @@ export async function sendMessageCore({
     trimmedMessage
   );
   const permanentMemories = await recallLongTermMemories(memoryOwnerId, trimmedMessage);
-  await emitEvent(onEvent, {
+  await emitEvent(steps, onEvent, {
     type: "step",
     name: "permanent_memory",
     content: `召回永久记忆 ${permanentMemories.length} 条`,
@@ -343,9 +409,6 @@ export async function sendMessageCore({
 
   const latestToolRun = await getLatestToolRun<WebSearchResult>(sessionId);
   const toolStatusFollowUp = isToolStatusFollowUp(trimmedMessage);
-  const directToolStatusReply = toolStatusFollowUp
-    ? buildToolStatusReply(latestToolRun)
-    : undefined;
   const sourceIndex = referencedSourceIndex(trimmedMessage);
   const referencedSource =
     sourceIndex !== null && latestToolRun && !latestToolRun.expired
@@ -355,13 +418,13 @@ export async function sendMessageCore({
 
   // ⛔ 安全拦截 — 命中违规话题，跳过所有搜索和 LLM 调用
   if (toolDecision.safetyBlocked) {
-    await emitEvent(onEvent, {
+    await emitEvent(steps, onEvent, {
       type: "step",
       name: "tool_decision",
       content: "安全拦截：" + (toolDecision.safetyReason ?? "话题违规"),
     });
     const result: SendMessageResult = { reply: "抱歉，这个话题我不能查。换一个吧。", sessionId, memory: { recalled: 0, activated: 0, candidates: 0 } };
-    await emitEvent(onEvent, { type: "done", content: result });
+    await emitEvent(steps, onEvent, { type: "done", content: result });
     return result;
   }
 
@@ -375,7 +438,7 @@ export async function sendMessageCore({
     queries: toolDecision.queries,
     contextTopic: conversationContext.topic,
   });
-  await emitEvent(onEvent, {
+  await emitEvent(steps, onEvent, {
     type: "step",
     name: "tool_decision",
     content: referencedSource
@@ -401,9 +464,16 @@ export async function sendMessageCore({
       }
     | undefined;
 
-  if (toolDecision.useWebSearch && !referencedSource) {
+  // 追问联网状态：本轮判定会联网→走真实联网（不再直接套用旧记录，避免答非所问）；本轮不联网→如实说明未联网
+  const directToolStatusReply = toolStatusFollowUp
+    ? toolDecision.useWebSearch
+      ? undefined
+      : buildToolStatusReply(latestToolRun, { noCurrentSearch: true })
+    : undefined;
+
+  if (toolDecision.useWebSearch && !referencedSource && !directToolStatusReply) {
     try {
-      await emitEvent(onEvent, {
+      await emitEvent(steps, onEvent, {
         type: "step",
         name: "web_search",
         content: `开始搜索：${toolDecision.query}`,
@@ -432,14 +502,14 @@ export async function sendMessageCore({
           results: weatherResults.length,
         });
 
-        await emitEvent(onEvent, {
+        await emitEvent(steps, onEvent, {
           type: "step",
           name: "web_search",
           content: `天气查询完成，获得 ${weatherResults.length} 条结果`,
         });
 
         for (const [index, result] of weatherResults.entries()) {
-          await emitEvent(onEvent, {
+          await emitEvent(steps, onEvent, {
             type: "source",
             content: { ...result, index: index + 1 },
           });
@@ -486,14 +556,14 @@ export async function sendMessageCore({
           })),
         });
 
-        await emitEvent(onEvent, {
+        await emitEvent(steps, onEvent, {
           type: "step",
           name: "web_search",
           content: `搜索完成，找到 ${searchResponse.results.length} 条结果，过滤后可用 ${relevantResults.length} 条`,
         });
 
         for (const [index, result] of relevantResults.entries()) {
-          await emitEvent(onEvent, {
+          await emitEvent(steps, onEvent, {
             type: "source",
             content: { ...result, index: index + 1 },
           });
@@ -510,7 +580,7 @@ export async function sendMessageCore({
         queries: toolDecision.queries,
         error: errorMessage,
       });
-      await emitEvent(onEvent, {
+      await emitEvent(steps, onEvent, {
         type: "error",
         content: `联网搜索失败：${errorMessage}`,
       });
@@ -540,7 +610,7 @@ export async function sendMessageCore({
     const searchKeyword = keyword || (trimmedMessage.length < 6 ? trimmedMessage : "科技");
 
     try {
-      await emitEvent(onEvent, {
+      await emitEvent(steps, onEvent, {
         type: "step",
         name: "news_search",
         content: `新闻技能搜索：${searchKeyword}`,
@@ -553,7 +623,7 @@ export async function sendMessageCore({
         results: newsResult.results,
         error: newsResult.error,
       };
-      await emitEvent(onEvent, {
+      await emitEvent(steps, onEvent, {
         type: "step",
         name: "news_search",
         content: newsResult.total_found > 0
@@ -569,7 +639,7 @@ export async function sendMessageCore({
   }
 
   // 2. 获取历史记忆
-  await emitEvent(onEvent, {
+  await emitEvent(steps, onEvent, {
     type: "step",
     name: "memory",
     content: `载入短期上下文 ${memory.getAll().length} 条消息${
@@ -586,6 +656,21 @@ export async function sendMessageCore({
     },
   ];
 
+  // 注入真实技能档案：与前端"能力插件"（/settings/skills）同一来源，实时扫描 skills/ 文件夹
+  const loadedSkills = listSkills();
+  if (loadedSkills.length > 0) {
+    const skillLines = loadedSkills
+      .map((skill, index) => `${index + 1}. ${skill.name}：${skill.description}`)
+      .join("\n");
+    messages.push({
+      role: "system",
+      content: `## 已加载技能档案（真实数据，如实回答，勿虚构、勿遗漏）
+系统当前已加载 ${loadedSkills.length} 个技能：
+${skillLines}
+当玩家问"你有几个技能""你能做什么""能力插件里有什么""调用某个技能"时，如实按上面的清单回答，保持银狼语气；技能数量和名称必须与清单一致，不要说自己没有技能或只有聊天能力。玩家具体询问某个技能怎么用时，按该技能说明简要回答。`,
+    });
+  }
+
   if (toolDecision.reason === "weather-location-missing") {
     messages.push({
       role: "system",
@@ -594,7 +679,7 @@ export async function sendMessageCore({
     });
   }
 
-  if (toolStatusFollowUp) {
+  if (toolStatusFollowUp && !toolDecision.useWebSearch) {
     messages.push({
       role: "system",
       content: latestToolRun
@@ -604,6 +689,15 @@ export async function sendMessageCore({
             ? `玩家正在追问上一轮联网查询状态。数据库记录显示查询请求完成了，但过滤后没有可靠可用结果：意图=${latestToolRun.intent}，查询词=${latestToolRun.query}，提供商=${latestToolRun.provider}，抓取时间=${latestToolRun.fetchedAt}。必须区分"请求完成但没有可靠结果"和"网络报错"，不要笼统说系统抽风。`
             : `玩家正在追问上一轮联网查询状态。数据库记录显示查询发生错误：意图=${latestToolRun.intent}，查询词=${latestToolRun.query}，提供商=${latestToolRun.provider}，错误=${latestToolRun.error ?? "未记录具体错误"}，时间=${latestToolRun.fetchedAt}。请简短说明真实错误，不要编造其他原因。`
         : "玩家正在追问此前联网查询状态，但当前会话没有可读取的工具运行记录。请如实说明无法确认上一轮具体状态，并建议重新发起一次明确查询；不要猜测系统曾经失败。",
+    });
+  }
+
+  // 防幻觉：本轮没有真实联网结果时，禁止 LLM 编造"查到了/已联网"
+  if (!webSearch?.used && !directToolStatusReply) {
+    messages.push({
+      role: "system",
+      content:
+        "你本轮没有调用联网查询工具，也没有真实搜索结果。若玩家问的是最新/实时/联网类信息，如实说明本轮没有联网查询、没有实时搜索结果，不要编造来源、链接、平台信息或声称自己已经联网查询；需要实时数据时可建议玩家重新发起一次明确的联网查询。",
     });
   }
 
@@ -747,14 +841,37 @@ ${newsText}
     const contentParts: Array<{ type: string; text?: string; image_url?: { url: string } }> = [];
     // 文本类附件内容
     const TEXT_EXTENSIONS = new Set([".txt", ".md", ".csv", ".json", ".xml", ".html", ".css", ".js", ".ts", ".py", ".java", ".c", ".cpp", ".go", ".rs"]);
+    // 检测当前模型是否支持视觉（图片输入）
+    let visionSupported = false;
+    try {
+      const activeCfg = await getActiveLlmModelConfig();
+      visionSupported = modelSupportsVision(activeCfg.model, activeCfg.provider);
+    } catch { /* 无法获取模型配置时默认不支持视觉 */ }
+    const hasImage = attachments.some((a) => a.type.startsWith("image/"));
+    if (hasImage && !visionSupported) {
+      await emitEvent(steps, onEvent, {
+        type: "step",
+        name: "input",
+        content: "当前模型不支持图片识别，图片将以文字说明形式发送，建议更换支持视觉的模型。",
+      });
+      logger.warn("agent", "image attached but model does not support vision", {
+        attachments: attachments.filter((a) => a.type.startsWith("image/")).map((a) => a.name),
+      });
+    }
     for (const att of attachments) {
       const isImage = att.type.startsWith("image/");
       const ext = att.name.includes(".") ? "." + att.name.split(".").pop()!.toLowerCase() : "";
       if (isImage) {
-        contentParts.push({
-          type: "image_url",
-          image_url: { url: `data:${att.type};base64,${att.data}` },
-        });
+        if (visionSupported) {
+          contentParts.push({
+            type: "image_url",
+            image_url: { url: `data:${att.type};base64,${att.data}` },
+          });
+        } else {
+          // 纯文本模型：图片转文字说明，避免被 API 序列化成 JSON 字符串
+          const sizeKb = att.size ? `${(att.size / 1024).toFixed(1)}KB` : "未知大小";
+          contentParts.push({ type: "text", text: `[图片附件: ${att.name} (${sizeKb}, ${att.type || "未知格式"}) — 当前模型不支持视觉识别，无法查看图片内容]` });
+        }
       } else if (TEXT_EXTENSIONS.has(ext)) {
         try {
           const text = Buffer.from(att.data, "base64").toString("utf-8");
@@ -774,7 +891,7 @@ ${newsText}
   }
 
   // 4. 调用大模型
-  await emitEvent(onEvent, {
+  await emitEvent(steps, onEvent, {
     type: "step",
     name: "llm",
     content: stream ? "开始流式生成回复" : "开始生成回复",
@@ -791,22 +908,96 @@ ${newsText}
       baseURL: model.baseURL,
     };
   };
+
+  // ── 4.1 技能主动调用（function calling）──
+  // 玩家消息可能涉及技能时，先让模型决定是否调用真实技能（写文件/搜索/天气/新闻），
+  // 执行结果作为 tool 消息回传后再进入最终生成；搜索/天气/新闻若已被规则前置执行则排除同名工具。
+  let llmMessages = messages;
+  if (!directToolStatusReply && mayInvokeSkill(trimmedMessage)) {
+    const excludedTools: string[] = [];
+    if (webSearch?.used) excludedTools.push(webSearch.provider === "weather" ? "weather" : "web_search");
+    if (newsSearch?.used) excludedTools.push("news_search");
+    const skillTools = buildSkillTools({ exclude: excludedTools });
+    try {
+      let currentMessages = [...messages];
+      let toolResponse = await chatWithTools({
+        messages: currentMessages,
+        tools: skillTools,
+        signal,
+        onModelResolved: rememberResolvedModel,
+      });
+      let round = 0;
+      while (toolResponse.toolCalls.length > 0 && round < MAX_SKILL_TOOL_ROUNDS) {
+        await emitEvent(steps, onEvent, {
+          type: "step",
+          name: "tool_decision",
+          content: `银狼调用技能：${toolResponse.toolCalls.map((t) => t.name).join("、")}`,
+        });
+        const assistantToolMsg: ChatCompletionMessageParam = {
+          role: "assistant",
+          content: null,
+          tool_calls: toolResponse.toolCalls.map((tc) => ({
+            id: tc.id,
+            type: "function" as const,
+            function: { name: tc.name, arguments: tc.arguments },
+          })),
+        };
+        const toolResults: ChatCompletionMessageParam[] = [];
+        for (const tc of toolResponse.toolCalls) {
+          let resultText: string;
+          try {
+            const args = JSON.parse(tc.arguments || "{}") as Record<string, unknown>;
+            resultText = await executeSkill(tc.name, args, signal);
+          } catch (err) {
+            const errorMessage = err instanceof Error ? err.message : String(err);
+            logger.error("agent", "skill execution failed", {
+              requestId,
+              sessionId,
+              skill: tc.name,
+              error: errorMessage,
+            });
+            resultText = `技能执行失败：${errorMessage}`;
+          }
+          toolResults.push({ role: "tool", tool_call_id: tc.id, content: resultText });
+        }
+        currentMessages = [...currentMessages, assistantToolMsg, ...toolResults];
+        round += 1;
+        if (round >= MAX_SKILL_TOOL_ROUNDS) break;
+        toolResponse = await chatWithTools({
+          messages: currentMessages,
+          tools: skillTools,
+          signal,
+          onModelResolved: rememberResolvedModel,
+        });
+      }
+      llmMessages = currentMessages;
+    } catch (err) {
+      // 工具决策失败不阻塞主流程，回退到正常回复
+      logger.warn("agent", "skill tool decision failed, falling back to normal reply", {
+        requestId,
+        sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      llmMessages = messages;
+    }
+  }
+
   const rawReply = directToolStatusReply ?? (stream
     ? await chatStream({
-        messages,
+        messages: llmMessages,
         signal,
         onModelResolved: rememberResolvedModel,
         onDelta: async (delta) => {
-          await emitEvent(onEvent, { type: "delta", content: delta });
+          await emitEvent(steps, onEvent, { type: "delta", content: delta });
         },
       } as ChatParams & { onDelta: (delta: string) => Promise<void> })
     : await chat({
-        messages,
+        messages: llmMessages,
         signal,
         onModelResolved: rememberResolvedModel,
       } as ChatParams));
   if (directToolStatusReply && stream) {
-    await emitEvent(onEvent, { type: "delta", content: directToolStatusReply });
+    await emitEvent(steps, onEvent, { type: "delta", content: directToolStatusReply });
   }
   const reply = removeUnsupportedCitations(rawReply, webSearch);
   signal?.throwIfAborted();
@@ -825,8 +1016,8 @@ ${newsText}
     webSearchResults: webSearch?.results.length ?? 0,
   });
 
-  // 5. 保存记忆
-  await saveConversationTurn(sessionId, trimmedMessage, reply, memoryOwnerId);
+  // 5. 保存记忆（连同本轮"查看过程"日志一起持久化）
+  await saveConversationTurn(sessionId, trimmedMessage, reply, memoryOwnerId, steps);
   if (webSearch?.used && webSearch.fetchedAt && webSearch.provider && webSearch.intent) {
     await saveToolRun({
       sessionId,
@@ -850,7 +1041,7 @@ ${newsText}
     sessionId,
     trimmedMessage
   );
-  await emitEvent(onEvent, {
+  await emitEvent(steps, onEvent, {
     type: "step",
     name: "database",
     content: `对话已保存到 PostgreSQL；永久记忆激活 ${memoryUpdate.activated.length} 条，候选 ${memoryUpdate.observed.filter((item) => item.status === "candidate").length} 条`,
@@ -858,7 +1049,7 @@ ${newsText}
 
   try {
     await compressSessionContextIfNeeded(sessionId, signal, memoryOwnerId);
-    await emitEvent(onEvent, {
+    await emitEvent(steps, onEvent, {
       type: "step",
       name: "compression",
       content: "上下文压缩检查完成",
@@ -870,7 +1061,7 @@ ${newsText}
       sessionId,
       error: errorMessage,
     });
-    await emitEvent(onEvent, {
+    await emitEvent(steps, onEvent, {
       type: "error",
       content: `上下文压缩失败：${errorMessage}`,
     });
@@ -885,9 +1076,10 @@ ${newsText}
       recalled: permanentMemories.length,
       activated: memoryUpdate.activated.length,
       candidates: memoryUpdate.observed.filter((item) => item.status === "candidate").length,
+      deleted: memoryUpdate.deleted ?? 0,
     },
   };
-  await emitEvent(onEvent, { type: "done", content: result });
+  await emitEvent(steps, onEvent, { type: "done", content: result });
   return result;
 }
 
@@ -895,9 +1087,10 @@ export async function sendMessage(
   message: string,
   sessionId = "default",
   signal?: AbortSignal,
-  memoryOwnerId = "local-default"
+  memoryOwnerId = "local-default",
+  requestId = "local"
 ): Promise<SendMessageResult> {
-  return sendMessageCore({ message, sessionId, signal, memoryOwnerId });
+  return sendMessageCore({ message, sessionId, signal, memoryOwnerId, requestId });
 }
 
 export async function clearSession(sessionId = "default"): Promise<boolean> {

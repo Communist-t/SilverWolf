@@ -73,6 +73,11 @@ const WEB_SEARCH_TRIGGERS = [
   "文档",
   "开源",
   "GitHub",
+  "下载",
+  "安装",
+  "安装包",
+  "渠道",
+  "链接",
   "current",
   "latest",
   "today",
@@ -80,6 +85,29 @@ const WEB_SEARCH_TRIGGERS = [
   "search",
   "look up",
 ];
+
+/**
+ * 语义级联网触发：命中常见"帮我查/这是什么软件/怎么下载"等自然问法，
+ * 但不含任何字面触发词时的兜底。刻意避免误触"卡芙卡是谁""人生有什么意义"
+ * 这类无需联网的闲聊/哲学问题。
+ */
+const SEMANTIC_SEARCH_PATTERNS: RegExp[] = [
+  // 找/求/搜 某个软件/应用/工具/下载/链接
+  /(?:找|求|搜).{0,14}(?:软件|应用|app|工具|下载|链接|地址|渠道|安装)/i,
+  // 软件/应用/工具/程序 + 下载/安装/链接/官网/在哪
+  /(?:软件|应用|app|工具|程序).{0,10}(?:下载|安装|链接|地址|渠道|官网|在哪|哪里)/i,
+  // "是干啥的/干什么用/干嘛用/做什么用/有啥用/什么用途"类用途询问
+  /(?:是|叫|这是|这个|那个).{0,8}(?:干啥用|干什么用|干嘛用|做什么用|做啥用|有啥用|什么用途|是干啥|是干嘛|是做什么的|是干什么的)/i,
+  // "什么软件/哪个软件/啥软件/什么工具/什么app" + 推荐/好用/是什么
+  /(?:什么|哪个|啥|有没有).{0,4}(?:软件|应用|app|工具|插件|程序).{0,8}(?:推荐|好用|是啥|是什么|怎么样|好用吗)/i,
+  // 官网/官方/正版 + 下载/地址/链接
+  /(?:官网|官方|正版).{0,12}(?:下载|地址|链接|渠道|入口|网址)/i,
+];
+
+/** 判断输入是否命中"需要联网查一下"的语义信号（供 chat-agent 兜底路径复用） */
+export function hasSemanticSearchSignal(input: string): boolean {
+  return SEMANTIC_SEARCH_PATTERNS.some((pattern) => pattern.test(input));
+}
 
 const DIRECT_SEARCH_PREFIXES = [
   "/search",
@@ -101,7 +129,7 @@ const FILLER_PATTERNS = [
   /^(吧|呗|啊|呢|呀|嘛|啦)+/,
   /(好不好|行不行|可以吗|咋样|怎么样|如何|爱你|谢谢你|谢谢|！！！|!!|!|。|，|,|\?|\？)+$/g,
   /^(一下|下|有关|关于|一个叫|叫|一下一个叫|一个)/,
-  /(是干什么的|是做什么的|干什么的|做什么的|是什么|介绍一下|给我看看)$/g,
+  /(是干什么的|是做什么的|干什么的|做什么的|是什么|是干啥用的|是干嘛用的|是做什么用的|干什么用的|干嘛用的|介绍一下|给我看看)$/g,
 ];
 
 // ── 安全拦截规则（最高优先级，命中后完全跳过搜索） ──────────────
@@ -546,6 +574,22 @@ export function decideTools(
     };
   }
 
+  // 写文件 / 生成文档类请求（如"写一个 word / 生成 PDF / 做一个 PPT"）
+  // 交由文档技能处理，不联网搜索（避免"文档"等触发词误触发搜索）
+  const fileWriteRequest =
+    /(写|生成|创建|保存|导出|做|弄|搞).{0,12}(md|markdown|docx|pptx|pdf|ppt|word|文件|文档|报告|演示文稿|笔记)/i.test(
+      input
+    );
+  if (fileWriteRequest) {
+    return {
+      useWebSearch: false,
+      query: input,
+      queries: [],
+      intent: "general",
+      reason: "file-write-intent",
+    };
+  }
+
   const lowerInput = input.toLowerCase();
   const matchedTrigger = WEB_SEARCH_TRIGGERS.find((trigger) =>
     lowerInput.includes(trigger.toLowerCase())
@@ -562,6 +606,7 @@ export function decideTools(
     };
   }
   const travelRequest = isTravelRequest(input);
+  const semanticSearch = hasSemanticSearchSignal(input);
   const newsContextFollowUp =
     context?.topic === "news" &&
     /(?:第\s*(?:\d+|[一二三四五六七八九十])\s*(?:条|个|项))|更详细|详细|展开|讲讲|细说|具体|继续|然后呢|还有呢|多说点|详细信息/.test(input);
@@ -579,18 +624,29 @@ export function decideTools(
     weatherRequest ||
     travelRequest ||
     hardwareProductFollowUp ||
-    newsContextFollowUp
+    newsContextFollowUp ||
+    semanticSearch
   ) {
     const intent = useHardwareContext
       ? "product"
       : newsContextFollowUp
         ? "news"
       : detectIntent(input, query);
-    const queries = newsContextFollowUp && context?.searchHints?.length
+    const baseQueries = newsContextFollowUp && context?.searchHints?.length
       ? context.searchHints
       : useHardwareContext
       ? buildHardwareQueries(input, query, context)
       : buildQueries(input, query, intent);
+    // 产品/技术/官方类查询：补充连续话题中的主题实体（如追问"找个下载链接"时带上前文的 CatNote）
+    const topicKeyword = !useHardwareContext
+      ? (context?.keywords ?? []).find((k) => /[A-Za-z]/.test(k))
+      : undefined;
+    const queries =
+      topicKeyword && (intent === "product" || intent === "technical" || intent === "official")
+        ? baseQueries.map((q) =>
+            q.toLowerCase().includes(topicKeyword.toLowerCase()) ? q : `${topicKeyword} ${q}`
+          )
+        : baseQueries;
     return {
       useWebSearch: !newsContextFollowUp || !/第?\s*(?:\d+|[一二三四五六])\s*(?:条|个|项)/.test(input),
       query: queries[0] ?? query,
@@ -604,6 +660,8 @@ export function decideTools(
           ? "travel-signal"
         : newsContextFollowUp
           ? "news-context-follow-up"
+        : semanticSearch
+          ? "semantic-search-signal"
         : "hardware-follow-up",
     };
   }

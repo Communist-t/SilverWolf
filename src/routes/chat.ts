@@ -18,13 +18,36 @@ const activeSessions = new Map<string, string>();
 const MAX_MESSAGE_LENGTH = 12_000;
 const MAX_SESSION_ID_LENGTH = 120;
 const SAFE_ID_PATTERN = /^[a-zA-Z0-9._:-]+$/;
+const MAX_ATTACHMENTS = 8;
+const MAX_ATTACHMENT_DATA_LENGTH = 12 * 1024 * 1024; // base64 长度上限，约 9MB 原始数据
 
-function validateChatInput(message: unknown, sessionId: unknown): string | null {
-  if (typeof message !== "string" || !message.trim()) return "缺少 message 字段";
-  if (message.length > MAX_MESSAGE_LENGTH) return `消息过长，最多 ${MAX_MESSAGE_LENGTH} 个字符`;
-  if (typeof sessionId !== "string" || !sessionId.trim()) return "sessionId 不能为空";
+function validateChatInput(message: unknown, sessionId: unknown): { error: string; status: number } | null {
+  if (typeof message !== "string" || !message.trim()) return { error: "缺少 message 字段", status: 400 };
+  if (message.length > MAX_MESSAGE_LENGTH) return { error: `消息过长，最多 ${MAX_MESSAGE_LENGTH} 个字符`, status: 413 };
+  if (typeof sessionId !== "string" || !sessionId.trim()) return { error: "sessionId 不能为空", status: 400 };
   if (sessionId.length > MAX_SESSION_ID_LENGTH || !SAFE_ID_PATTERN.test(sessionId)) {
-    return "sessionId 格式无效";
+    return { error: "sessionId 格式无效", status: 400 };
+  }
+  return null;
+}
+
+function validateAttachments(attachments: unknown): { error: string; status: number } | null {
+  if (attachments === undefined || attachments === null) return null;
+  if (!Array.isArray(attachments)) return { error: "attachments 必须是数组", status: 400 };
+  if (attachments.length > MAX_ATTACHMENTS) {
+    return { error: `附件数量过多，最多 ${MAX_ATTACHMENTS} 个`, status: 413 };
+  }
+  for (const attachment of attachments) {
+    if (typeof attachment !== "object" || attachment === null) {
+      return { error: "附件格式无效", status: 400 };
+    }
+    const { name, type, data } = attachment as Record<string, unknown>;
+    if (typeof name !== "string" || typeof type !== "string" || typeof data !== "string") {
+      return { error: "附件字段无效", status: 400 };
+    }
+    if (data.length > MAX_ATTACHMENT_DATA_LENGTH) {
+      return { error: "单个附件过大（超过 9MB）", status: 413 };
+    }
   }
   return null;
 }
@@ -87,7 +110,7 @@ chatRoute.post("/", async (c) => {
   const memoryOwnerId = (await resolveMemoryOwnerId(c.req.header("X-User-Token"))) ?? "local-default";
 
   const validationError = validateChatInput(message, sessionId);
-  if (validationError) return c.json({ error: validationError }, 400);
+  if (validationError) return c.json({ error: validationError.error }, validationError.status as any);
 
   let request: ReturnType<typeof requestController>;
   try {
@@ -108,7 +131,7 @@ chatRoute.post("/", async (c) => {
       sessionId,
       messagePreview: messagePreview(message),
     });
-    const result = await sendMessage(message, sessionId, request.signal, memoryOwnerId);
+    const result = await sendMessage(message, sessionId, request.signal, memoryOwnerId, requestId);
     logger.info("chat", "request completed", {
       requestId,
       sessionId,
@@ -155,7 +178,10 @@ chatRoute.post("/stream", async (c) => {
   const memoryOwnerId = (await resolveMemoryOwnerId(c.req.header("X-User-Token"))) ?? "local-default";
 
   const validationError = validateChatInput(message, sessionId);
-  if (validationError) return c.json({ error: validationError }, 400);
+  if (validationError) return c.json({ error: validationError.error }, validationError.status as any);
+
+  const attachmentError = validateAttachments(body.attachments);
+  if (attachmentError) return c.json({ error: attachmentError.error }, attachmentError.status as any);
 
   logger.info("chat-stream", "request started", {
     requestId,
@@ -178,10 +204,19 @@ chatRoute.post("/stream", async (c) => {
 
   return streamSSE(c, async (stream) => {
     const send = async (event: ChatEvent) => {
-      await stream.writeSSE({
-        event: event.type,
-        data: JSON.stringify(event),
-      });
+      try {
+        await stream.writeSSE({
+          event: event.type,
+          data: JSON.stringify(event),
+        });
+      } catch (err) {
+        // 客户端断开或底层流已关闭时，writeSSE 会抛错。
+        // 只记录不中断：让对话流水线继续完成落库（生成中止由 abort 信号负责）。
+        logger.debug("chat-stream", "sse write failed, client may have disconnected", {
+          requestId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     };
 
     try {

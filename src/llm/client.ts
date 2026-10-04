@@ -1,15 +1,13 @@
 /**
  * 大模型 API 适配层
  *
- * 基于 OpenAI 兼容协议。换模型只需修改 .env 中的 baseURL + apiKey + model。
- * 支持的模型（示例）：
- *   - OpenAI:    baseURL=https://api.openai.com/v1
- *   - DeepSeek:  baseURL=https://api.deepseek.com/v1
- *   - 其他兼容服务: 填入对应 baseURL 即可
+ * 基于 OpenAI 兼容协议。模型配置（provider/base_url/model/api_key）统一存于
+ * 数据库 llm_model_configs，通过模型设置接口（/settings/models）管理，
+ * 不再从 .env 读取密钥。
  */
 
 import OpenAI from "openai";
-import type { ChatCompletionMessageParam, ChatCompletionCreateParamsNonStreaming, ChatCompletionCreateParamsStreaming } from "openai/resources/chat/completions";
+import type { ChatCompletionMessageParam, ChatCompletionCreateParamsNonStreaming, ChatCompletionCreateParamsStreaming, ChatCompletionTool } from "openai/resources/chat/completions";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { config } from "../config.js";
 import {
@@ -400,9 +398,11 @@ function logRequestMessages(
   messages: ChatCompletionMessageParam[],
   extra?: { temperature?: number; maxTokens?: number; stream?: boolean; extraParams?: Record<string, unknown> }
 ): void {
+  // 完整提示词仅在 debug 日志等级输出，避免生产环境明文泄露
+  if ((process.env.LOG_LEVEL ?? "info").toLowerCase() !== "debug") return;
   console.log("\n" + "=".repeat(80));
   console.log(
-    `📤 [LLM REQUEST] model=${model}${extra?.stream ? " (stream)" : ""} temp=${extra?.temperature ?? 0.8} maxTokens=${extra?.maxTokens ?? 512}`
+    `📤 [LLM REQUEST] model=${model}${extra?.stream ? " (stream)" : ""} temp=${extra?.temperature ?? 0.8} maxTokens=${extra?.maxTokens ?? 4096}`
   );
   if (extra?.extraParams && Object.keys(extra.extraParams).length > 0) {
     console.log(`   extra params: ${JSON.stringify(extra.extraParams)}`);
@@ -423,6 +423,7 @@ function logRequestMessages(
 }
 
 function logResponseContent(model: string, content: string): void {
+  if ((process.env.LOG_LEVEL ?? "info").toLowerCase() !== "debug") return;
   console.log("\n" + "=".repeat(80));
   console.log(`📥 [LLM RESPONSE] model=${model} length=${content.length}`);
   console.log("-".repeat(80));
@@ -452,6 +453,26 @@ export interface ChatParams {
   maxTokens?: number;
   signal?: AbortSignal;
   onModelResolved?: (model: LlmModelConfig) => void;
+  /** 失败重试次数上限（默认 MAX_LLM_RETRIES）；后台任务可传 0 禁用重试 */
+  maxRetries?: number;
+}
+
+/** 模型请求的单个工具调用 */
+export interface ToolCallRequest {
+  id: string;
+  name: string;
+  arguments: string;
+}
+
+export interface ChatWithToolsResponse {
+  /** 模型最终文本回复（无工具调用时为完整回复；有工具调用时通常为 null） */
+  content: string | null;
+  toolCalls: ToolCallRequest[];
+}
+
+export interface ChatWithToolsParams extends ChatParams {
+  /** OpenAI 格式的工具定义 */
+  tools?: ChatCompletionTool[];
 }
 
 export interface ChatStreamParams extends ChatParams {
@@ -476,6 +497,7 @@ function isRetryableError(error: unknown): boolean {
     msg.includes("socket hang up") ||
     msg.includes("Internal Server Error") ||
     msg.includes("Service Unavailable") ||
+    msg.includes("503") ||
     msg.includes("Bad Gateway") ||
     msg.includes("Gateway Timeout") ||
     msg.includes("Connection ended")
@@ -485,6 +507,12 @@ function isRetryableError(error: unknown): boolean {
 /** 带中断支持的 sleep */
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
+    // 信号可能在上一次尝试失败与本次 sleep 之间就已中止；
+    // 此时 abort 事件不会再触发，必须立即拒绝，避免白等整个间隔。
+    if (signal?.aborted) {
+      reject(signal.reason ?? new Error("aborted"));
+      return;
+    }
     const timer = setTimeout(resolve, ms);
     signal?.addEventListener(
       "abort",
@@ -511,10 +539,15 @@ async function chatOnce(params: ChatParams): Promise<string> {
     extraParams.enable_thinking = false;
     extraParams.chat_template_kwargs = { enable_thinking: false };
   }
+  // MiniMax 原生会输出 [TOOL_CALL] 工具调用标记；本应用由自身管道执行工具，
+  // 模型不需要原生调用工具，强制关闭以避免它把工具调用当正文输出。
+  if (activeModel.provider.toLowerCase().includes("minimax")) {
+    extraParams.tool_choice = "none";
+  }
 
   logRequestMessages(activeModel.model, params.messages, {
     temperature: params.temperature ?? 0.8,
-    maxTokens: params.maxTokens ?? 512,
+    maxTokens: params.maxTokens ?? 4096,
     extraParams,
   });
 
@@ -523,7 +556,7 @@ async function chatOnce(params: ChatParams): Promise<string> {
       model: activeModel.model,
       messages: params.messages,
       temperature: params.temperature ?? 0.8,
-      max_tokens: params.maxTokens ?? 512,
+      max_tokens: params.maxTokens ?? 4096,
       ...extraParams,
     } as ChatCompletionCreateParamsNonStreaming,
     { signal: params.signal }
@@ -566,8 +599,9 @@ async function chatOnce(params: ChatParams): Promise<string> {
  */
 export async function chat(params: ChatParams): Promise<string> {
   let lastError: Error | null = null;
+  const maxRetries = params.maxRetries ?? MAX_LLM_RETRIES;
 
-  for (let attempt = 1; attempt <= MAX_LLM_RETRIES; attempt++) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       return await chatOnce(params);
     } catch (error) {
@@ -575,10 +609,10 @@ export async function chat(params: ChatParams): Promise<string> {
       if (params.signal?.aborted) throw error;
       if (!isRetryableError(error)) throw error;
 
-      if (attempt < MAX_LLM_RETRIES) {
+      if (attempt < maxRetries) {
         logger.warn("llm", "retrying after retryable error", {
           attempt,
-          maxAttempts: MAX_LLM_RETRIES,
+          maxAttempts: maxRetries,
           intervalMs: LLM_RETRY_INTERVAL_MS,
           error: lastError.message,
         });
@@ -588,7 +622,145 @@ export async function chat(params: ChatParams): Promise<string> {
   }
 
   logger.error("llm", "all retry attempts exhausted", {
-    maxAttempts: MAX_LLM_RETRIES,
+    maxAttempts: maxRetries,
+    lastError: lastError?.message,
+  });
+  throw new Error("当前网络有问题，请重新尝试。");
+}
+
+/**
+ * 解析 MiniMax 原生 XML 工具调用格式。MiniMax 除 OpenAI 标准 JSON tool_calls 外，
+ * 也常以 minimax:tool_call 的 XML 形式返回，需要转成标准 ToolCallRequest。
+ */
+function parseMiniMaxXmlToolCalls(content: string): ToolCallRequest[] {
+  const results: ToolCallRequest[] = [];
+  const blockRe = /<minimax:tool_call>([\s\S]*?)<\/minimax:tool_call>/gi;
+  let blockMatch: RegExpExecArray | null;
+  while ((blockMatch = blockRe.exec(content)) !== null) {
+    const block = blockMatch[1];
+    const invokeMatch = block.match(/<invoke\s+name=["']([^"']+)["']/i);
+    if (!invokeMatch) continue;
+    const name = invokeMatch[1].trim();
+    const args: Record<string, unknown> = {};
+    const paramRe = /<parameter\s+name=["']([^"']+)["']>([\s\S]*?)<\/parameter>/gi;
+    let paramMatch: RegExpExecArray | null;
+    while ((paramMatch = paramRe.exec(block)) !== null) {
+      const key = paramMatch[1].trim();
+      let rawVal = paramMatch[2]
+        .trim()
+        .replace(/&lt;/g, "<")
+        .replace(/&gt;/g, ">")
+        .replace(/&quot;/g, '"')
+        .replace(/&amp;/g, "&");
+      if (!rawVal) continue;
+      try {
+        args[key] = JSON.parse(rawVal);
+      } catch {
+        args[key] = rawVal;
+      }
+    }
+    results.push({
+      id: `call_minimax_${Math.random().toString(36).slice(2, 10)}`,
+      name,
+      arguments: JSON.stringify(args),
+    });
+  }
+  return results;
+}
+
+/**
+ * 带工具调用（function calling）的对话（单次，不含重试）。
+ * 返回模型是否请求调用工具（toolCalls 非空）或直接给出文本回复（content）。
+ */
+async function chatWithToolsOnce(params: ChatWithToolsParams): Promise<ChatWithToolsResponse> {
+  const { client, activeModel } = await createClient();
+  params.onModelResolved?.(activeModel);
+
+  const extraParams: Record<string, unknown> = {};
+  if (activeModel.provider.toLowerCase().includes("qwen")) {
+    extraParams.enable_thinking = false;
+    extraParams.chat_template_kwargs = { enable_thinking: false };
+  }
+  // MiniMax 原生会输出 [TOOL_CALL] 标记；这里显式交给模型 auto 决策工具调用
+  if (activeModel.provider.toLowerCase().includes("minimax")) {
+    extraParams.tool_choice = "auto";
+  }
+
+  const response = await client.chat.completions.create(
+    {
+      model: activeModel.model,
+      messages: params.messages,
+      temperature: params.temperature ?? 0.8,
+      max_tokens: params.maxTokens ?? 1024,
+      tools: params.tools,
+      ...extraParams,
+    } as ChatCompletionCreateParamsNonStreaming,
+    { signal: params.signal }
+  );
+
+  const message = response.choices[0]?.message;
+  const toolCalls: ToolCallRequest[] = (message?.tool_calls ?? []).map((tc) => ({
+    id: tc.id,
+    name: tc.function?.name ?? "",
+    arguments: tc.function?.arguments ?? "{}",
+  }));
+  if (toolCalls.length > 0) {
+    return { content: null, toolCalls };
+  }
+
+  const rawContent = message?.content;
+  if (rawContent && typeof rawContent === "string") {
+    // MiniMax 可能以 XML 格式（<minimax:tool_call>）返回工具调用，需转成标准格式
+    const xmlToolCalls = parseMiniMaxXmlToolCalls(rawContent);
+    if (xmlToolCalls.length > 0) {
+      return { content: null, toolCalls: xmlToolCalls };
+    }
+  }
+  if (!rawContent) {
+    logger.warn("llm", "model returned empty content", { model: activeModel.model });
+    throw new Error("模型返回为空，请检查 API 配置。");
+  }
+  const content = stripThinkingContent(rawContent);
+  if (!content) {
+    logger.warn("llm", "content empty after thinking filter", {
+      model: activeModel.model,
+      rawLength: rawContent.length,
+    });
+    throw new Error("模型返回内容为空（可能全部是思考过程），请检查模型配置。");
+  }
+  return { content, toolCalls: [] };
+}
+
+/**
+ * 带工具调用（function calling）的对话（含重试）。
+ * 供银狼主动调用技能使用；重试逻辑与 chat 一致。
+ */
+export async function chatWithTools(params: ChatWithToolsParams): Promise<ChatWithToolsResponse> {
+  let lastError: Error | null = null;
+  const maxRetries = params.maxRetries ?? MAX_LLM_RETRIES;
+
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await chatWithToolsOnce(params);
+    } catch (error) {
+      lastError = error as Error;
+      if (params.signal?.aborted) throw error;
+      if (!isRetryableError(error)) throw error;
+
+      if (attempt < maxRetries) {
+        logger.warn("llm", "retrying tool-call request after retryable error", {
+          attempt,
+          maxAttempts: maxRetries,
+          intervalMs: LLM_RETRY_INTERVAL_MS,
+          error: lastError.message,
+        });
+        await sleep(LLM_RETRY_INTERVAL_MS, params.signal);
+      }
+    }
+  }
+
+  logger.error("llm", "all tool-call retry attempts exhausted", {
+    maxAttempts: maxRetries,
     lastError: lastError?.message,
   });
   throw new Error("当前网络有问题，请重新尝试。");
@@ -608,10 +780,15 @@ async function chatStreamOnce(params: ChatStreamParams): Promise<string> {
     extraParams.enable_thinking = false;
     extraParams.chat_template_kwargs = { enable_thinking: false };
   }
+  // MiniMax 原生会输出 [TOOL_CALL] 工具调用标记；本应用由自身管道执行工具，
+  // 模型不需要原生调用工具，强制关闭以避免它把工具调用当正文输出。
+  if (activeModel.provider.toLowerCase().includes("minimax")) {
+    extraParams.tool_choice = "none";
+  }
 
   logRequestMessages(activeModel.model, params.messages, {
     temperature: params.temperature ?? 0.8,
-    maxTokens: params.maxTokens ?? 512,
+    maxTokens: params.maxTokens ?? 4096,
     stream: true,
     extraParams,
   });
@@ -621,7 +798,7 @@ async function chatStreamOnce(params: ChatStreamParams): Promise<string> {
       model: activeModel.model,
       messages: params.messages,
       temperature: params.temperature ?? 0.8,
-      max_tokens: params.maxTokens ?? 512,
+      max_tokens: params.maxTokens ?? 4096,
       stream: true,
       ...extraParams,
     } as ChatCompletionCreateParamsStreaming,
@@ -692,6 +869,7 @@ async function chatStreamOnce(params: ChatStreamParams): Promise<string> {
 export async function chatStream(params: ChatStreamParams): Promise<string> {
   let contentSent = false;
   let lastError: Error | null = null;
+  const maxRetries = params.maxRetries ?? MAX_LLM_RETRIES;
 
   // 包装 onDelta，跟踪是否已向客户端发送内容
   const wrappedOnDelta = (delta: string) => {
@@ -699,7 +877,7 @@ export async function chatStream(params: ChatStreamParams): Promise<string> {
     return params.onDelta(delta);
   };
 
-  for (let attempt = 1; attempt <= MAX_LLM_RETRIES; attempt++) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
     contentSent = false;
     try {
       const result = await chatStreamOnce({ ...params, onDelta: wrappedOnDelta });
@@ -711,10 +889,10 @@ export async function chatStream(params: ChatStreamParams): Promise<string> {
       if (contentSent) throw error;
       if (!isRetryableError(error)) throw error;
 
-      if (attempt < MAX_LLM_RETRIES) {
+      if (attempt < maxRetries) {
         logger.warn("llm", "retrying stream after retryable error", {
           attempt,
-          maxAttempts: MAX_LLM_RETRIES,
+          maxAttempts: maxRetries,
           intervalMs: LLM_RETRY_INTERVAL_MS,
           error: lastError.message,
         });
@@ -724,7 +902,7 @@ export async function chatStream(params: ChatStreamParams): Promise<string> {
   }
 
   logger.error("llm", "all stream retry attempts exhausted", {
-    maxAttempts: MAX_LLM_RETRIES,
+    maxAttempts: maxRetries,
     lastError: lastError?.message,
   });
   throw new Error("当前网络有问题，请重新尝试。");

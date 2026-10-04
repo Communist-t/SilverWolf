@@ -1,6 +1,5 @@
 -- ============================================================
 -- Silver Wolf Agent — PostgreSQL 初始化脚本
--- 从 SQLite 迁移而来，所有表结构保持业务逻辑一致
 -- ============================================================
 
 -- 启用 UUID 扩展（如果后续需要用 UUID 类型）
@@ -32,6 +31,7 @@ CREATE TABLE IF NOT EXISTS messages (
     role         TEXT NOT NULL CHECK (role IN ('user', 'assistant', 'system')),
     content      TEXT NOT NULL,
     created_at   TEXT NOT NULL,
+    process      JSONB,               -- 该条助手回复的"查看过程"步骤（[{name, content}]）
     FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
 );
 
@@ -86,11 +86,14 @@ CREATE TABLE IF NOT EXISTS users (
 
 -- ============================================================
 -- 6. user_tokens — 登录令牌
+--    注意：token 列存储的是令牌的 SHA-256 哈希（非明文），
+--    明文令牌仅在登录/注册响应中一次性返回给客户端。
 -- ============================================================
 CREATE TABLE IF NOT EXISTS user_tokens (
     token       TEXT PRIMARY KEY,
     user_id     TEXT NOT NULL,
     created_at  TEXT NOT NULL,
+    expires_at  TEXT NOT NULL,
     FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
@@ -154,80 +157,3 @@ CREATE TABLE IF NOT EXISTS llm_model_configs (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_llm_model_configs_single_active
     ON llm_model_configs(active)
     WHERE active = 1;
-
--- ============================================================
--- 10. fitness_profile — 健身档案
--- ============================================================
-CREATE TABLE IF NOT EXISTS fitness_profile (
-    owner_id        TEXT PRIMARY KEY,
-    bmr             INTEGER DEFAULT 0,
-    calorie_target  INTEGER DEFAULT 0,
-    protein_target_g REAL DEFAULT 0,
-    carbs_target_g   REAL DEFAULT 0,
-    fat_target_g     REAL DEFAULT 0,
-    weight_kg       REAL,
-    height_cm       REAL,
-    age             INTEGER,
-    gender          TEXT,
-    activity_level  TEXT DEFAULT 'sedentary',
-    created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL
-);
-
--- ============================================================
--- 11. fitness_daily — 每日健身记录
--- ============================================================
-CREATE TABLE IF NOT EXISTS fitness_daily (
-    id          SERIAL PRIMARY KEY,
-    owner_id    TEXT NOT NULL,
-    date        TEXT NOT NULL,
-    calories    INTEGER DEFAULT 0,
-    protein_g   REAL DEFAULT 0,
-    carbs_g     REAL DEFAULT 0,
-    fat_g       REAL DEFAULT 0,
-    water_ml    INTEGER DEFAULT 0,
-    sleep_hours REAL DEFAULT 0,
-    notes       TEXT DEFAULT '',
-    created_at  TEXT NOT NULL,
-    updated_at  TEXT NOT NULL,
-    UNIQUE(owner_id, date)
-);
-
-CREATE INDEX IF NOT EXISTS idx_fitness_daily_owner_date
-    ON fitness_daily(owner_id, date DESC);
-
--- ============================================================
--- 12. fitness_workouts — 训练记录
--- ============================================================
-CREATE TABLE IF NOT EXISTS fitness_workouts (
-    id               SERIAL PRIMARY KEY,
-    owner_id         TEXT NOT NULL,
-    date             TEXT NOT NULL,
-    type             TEXT NOT NULL CHECK (type IN ('cardio', 'strength', 'mixed')),
-    duration_minutes INTEGER NOT NULL,
-    details          TEXT DEFAULT '',
-    intensity        TEXT DEFAULT 'moderate' CHECK (intensity IN ('low', 'moderate', 'high')),
-    created_at       TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_fitness_workouts_owner_date
-    ON fitness_workouts(owner_id, date DESC);
-
--- ============================================================
--- 13. fitness_meals — 饮食记录
--- ============================================================
-CREATE TABLE IF NOT EXISTS fitness_meals (
-    id          SERIAL PRIMARY KEY,
-    owner_id    TEXT NOT NULL,
-    date        TEXT NOT NULL,
-    meal_type   TEXT NOT NULL CHECK (meal_type IN ('breakfast', 'lunch', 'dinner', 'snack')),
-    food_name   TEXT NOT NULL,
-    calories    INTEGER NOT NULL,
-    protein_g   REAL DEFAULT 0,
-    carbs_g     REAL DEFAULT 0,
-    fat_g       REAL DEFAULT 0,
-    created_at  TEXT NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_fitness_meals_owner_date
-    ON fitness_meals(owner_id, date DESC);

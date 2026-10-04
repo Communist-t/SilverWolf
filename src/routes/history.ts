@@ -7,6 +7,7 @@ import {
   createSession,
   getSession,
   getSessionSummary,
+  listSessionContentDigests,
   listSessionMessages,
   listToolRuns,
   listSessions,
@@ -15,6 +16,8 @@ import {
 import { clearSession, removeSession } from "../agent/chat-agent.js";
 import { isSessionActive } from "./chat.js";
 import { resolveMemoryOwnerId } from "../agent/long-term-memory.js";
+import { chat } from "../llm/client.js";
+import { logger } from "../logger.js";
 
 const historyRoute = new Hono();
 const MAX_SESSION_ID_LENGTH = 120;
@@ -26,7 +29,12 @@ async function resolveOwner(c: { req: { header(name: string): string | undefined
 
 async function checkSessionOwnership(sessionId: string, ownerId: string): Promise<boolean> {
   const session = await getSession(sessionId);
-  return session?.ownerId === ownerId;
+  if (!session) return false;
+  // 允许归属为匿名默认 owner（local-default）的会话被当前用户访问/管理。
+  // 修复登录态与匿名态切换后产生的"孤儿会话"可见却删不掉（404）的问题；
+  // 同时仍保持不同真实用户之间的数据隔离。
+  if (session.ownerId === "local-default") return true;
+  return session.ownerId === ownerId;
 }
 
 function validSessionId(value: string): boolean {
@@ -60,13 +68,17 @@ function safeMarkdownHeading(value: string): string {
   return value.replace(/[\r\n]+/g, " ").replace(/^#+\s*/, "").trim() || "新对话";
 }
 
-function safeExportFileName(value: string): string {
+function safeExportBaseName(value: string): string {
   const normalized = value
     .replace(/[<>:"/\\|?*\u0000-\u001f]/g, "-")
     .replace(/[. ]+$/g, "")
     .trim()
     .slice(0, 80);
-  return `${normalized || "银狼对话"}.md`;
+  return normalized || "银狼对话";
+}
+
+function safeExportFileName(value: string, ext: "md" | "json" = "md"): string {
+  return `${safeExportBaseName(value)}.${ext}`;
 }
 
 function renderSessionMarkdown(
@@ -103,6 +115,30 @@ function renderSessionMarkdown(
   return lines.join("\n");
 }
 
+function renderSessionJson(
+  session: NonNullable<Awaited<ReturnType<typeof getSession>>>,
+  messages: Awaited<ReturnType<typeof listSessionMessages>>
+): string {
+  const payload = {
+    app: "Silver Wolf",
+    format: "silver-wolf-chat-export/v1",
+    exportedAt: new Date().toISOString(),
+    session: {
+      id: session.id,
+      title: session.title,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+      messageCount: messages.length,
+    },
+    messages: messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+      createdAt: m.createdAt,
+    })),
+  };
+  return JSON.stringify(payload, null, 2);
+}
+
 historyRoute.get("/info", (c) =>
   c.json({
     storage: "postgresql",
@@ -114,6 +150,162 @@ historyRoute.get("/sessions", async (c) => {
   const limit = parseLimit(c.req.query("limit"), 50);
   const ownerId = await resolveOwner(c);
   return c.json({ sessions: await listSessions(limit, ownerId) });
+});
+
+/**
+ * 数据分析：基于前端聚合的使用统计数据，调用当前配置的大模型生成 AI 分析。
+ * 统计本身由前端基于 /history/sessions 计算；本接口只负责把数据交给模型产出洞察。
+ */
+historyRoute.post("/analytics/analyze", async (c) => {
+  const body = await c.req.json<{ stats?: unknown }>().catch(() => null);
+  const stats =
+    body?.stats && typeof body.stats === "object" ? (body.stats as Record<string, unknown>) : {};
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 25_000);
+  try {
+    const analysis = await chat({
+      messages: [
+        {
+          role: "system",
+          content:
+            "你是专业的数据分析师，输出简洁、精炼、专业的中文分析，不要复述原始数字表，不要客套话。",
+        },
+        {
+          role: "user",
+          content:
+            `以下是银狼 AI Agent 的使用统计数据（JSON）：\n` +
+            `${JSON.stringify(stats)}\n\n` +
+            `请输出一段分析，包含：1) 关键发现 2) 数据趋势 3) 可操作建议。` +
+            `使用要点式，控制在 180 字以内。`,
+        },
+      ],
+      temperature: 0.5,
+      maxTokens: 600,
+      signal: controller.signal,
+      maxRetries: 1,
+    });
+    return c.json({ analysis });
+  } catch (error) {
+    logger.warn("analytics", "AI 分析生成失败", { error: String(error) });
+    return c.json({ error: "分析生成失败，请检查模型配置" }, 502);
+  } finally {
+    clearTimeout(timeout);
+  }
+});
+
+/** 从模型原始输出中稳健解析 JSON（容忍代码块与前后杂文） */
+function parseContentAnalysis(raw: string): {
+  overall: string;
+  topics: Array<{ name: string; sessionIds: string[] }>;
+} | null {
+  const text = raw
+    .trim()
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/```\s*$/, "")
+    .trim();
+  const start = text.indexOf("{");
+  const end = text.lastIndexOf("}");
+  if (start === -1 || end === -1 || end <= start) return null;
+  try {
+    const obj = JSON.parse(text.slice(start, end + 1)) as {
+      overall?: unknown;
+      topics?: unknown;
+    };
+    const overall = typeof obj.overall === "string" ? obj.overall.trim() : "";
+    const topics = Array.isArray(obj.topics)
+      ? (obj.topics as Array<Record<string, unknown>>)
+          .map((t) => ({
+            name:
+              (typeof t?.name === "string" ? t.name.trim() : "").slice(0, 24) ||
+              "未分类",
+            sessionIds: Array.isArray(t?.sessionIds)
+              ? (t.sessionIds as unknown[]).filter(
+                  (x): x is string => typeof x === "string"
+                )
+              : [],
+          }))
+          .filter((t) => t.sessionIds.length > 0)
+      : [];
+    return { overall, topics };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 内容级数据分析：返回每个会话的内容摘要（真实用户消息聚合 + 长期记忆摘要），
+ * 并在大模型可用时基于【会话真实内容】生成整体对话总结与主题分类，供"数据分析"面板展示。
+ */
+historyRoute.get("/analytics/content", async (c) => {
+  const ownerId = await resolveOwner(c);
+  const sessions = await listSessionContentDigests(ownerId, 200);
+  const payload = sessions.map((s) => ({
+    id: s.id,
+    title: s.title,
+    updatedAt: s.updatedAt,
+    messageCount: s.messageCount,
+    hasSummary: s.hasSummary,
+    summaryContent: s.summaryContent,
+    preview: s.preview,
+    contentDigest: s.contentDigest,
+  }));
+
+  if (sessions.length === 0) {
+    return c.json({ sessions: payload, ai: false, overall: null, topics: null });
+  }
+
+  // 只把真实会话内容喂给大模型（截断会话数控制 token），让它依据内容而非标题分析
+  const forLlm = sessions.slice(0, 120);
+  const digestLines = forLlm
+    .map((s) => {
+      const body = s.contentDigest || s.summaryContent || s.preview || "（无内容）";
+      return `[会话 ${s.id}] 内容：${body.slice(0, 160)}`;
+    })
+    .join("\n");
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+  try {
+    const raw = await chat({
+      temperature: 0.3,
+      maxTokens: 1600,
+      signal: controller.signal,
+      maxRetries: 1,
+      messages: [
+        {
+          role: "system",
+          content:
+            "你是对话管理分析师。你只输出合法 JSON，不要输出 JSON 以外的任何文字。",
+        },
+        {
+          role: "user",
+          content:
+            `下面是用户每个会话的【真实对话内容摘要】（取自会话内消息，不是标题）：\n${digestLines}\n\n` +
+            `请输出 JSON：\n{\n  "overall": "对整个对话历史的一句话总结（中文，概括用户主要聊了什么、关注什么，60-100字）",\n  "topics": [{"name":"主题名(≤10字)","sessionIds":["会话id"]}]\n}\n` +
+            `要求：\n` +
+            `1. 只依据上面给出的会话内容进行总结与分类，忽略会话标题/名称；\n` +
+            `2. 把每个会话恰好分到一个主题；sessionIds 只能使用上面出现的会话 id；\n` +
+            `3. 主题数量控制在 3-8 个；内容过少或无法归类的会话不必强行分配。`,
+        },
+      ],
+    });
+    const parsed = parseContentAnalysis(raw);
+    if (parsed) {
+      return c.json({
+        sessions: payload,
+        ai: true,
+        overall: parsed.overall,
+        topics: parsed.topics,
+      });
+    }
+    return c.json({ sessions: payload, ai: false, overall: null, topics: null });
+  } catch (error) {
+    logger.warn("analytics", "内容分析生成失败", { error: String(error) });
+    return c.json({ sessions: payload, ai: false, overall: null, topics: null });
+  } finally {
+    clearTimeout(timeout);
+  }
 });
 
 historyRoute.post("/sessions", async (c) => {
@@ -211,12 +403,17 @@ historyRoute.get("/sessions/:sessionId/export", async (c) => {
   if (!session) return c.json({ error: "会话不存在" }, 404);
 
   const messages = await listSessionMessages(sessionId, Math.max(session.messageCount, 1));
-  const fileName = safeExportFileName(session.title);
-  c.header("Content-Type", "text/markdown; charset=utf-8");
+  const format = c.req.query("format") === "json" ? "json" : "md";
+  const fileName = safeExportFileName(session.title, format);
   c.header(
     "Content-Disposition",
-    `attachment; filename="silver-wolf-chat.md"; filename*=UTF-8''${encodeURIComponent(fileName)}`
+    `attachment; filename="silver-wolf-chat.${format}"; filename*=UTF-8''${encodeURIComponent(fileName)}`
   );
+  if (format === "json") {
+    c.header("Content-Type", "application/json; charset=utf-8");
+    return c.body(renderSessionJson(session, messages));
+  }
+  c.header("Content-Type", "text/markdown; charset=utf-8");
   return c.body(renderSessionMarkdown(session, messages));
 });
 

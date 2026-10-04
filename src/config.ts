@@ -4,9 +4,8 @@ import { collectConfigErrors } from "./utils/config-validation.js";
 
 export const config = {
   llm: {
-    apiKey: process.env.LLM_API_KEY ?? "",
-    baseURL: process.env.LLM_BASE_URL ?? "https://api.openai.com/v1",
-    model: process.env.LLM_MODEL ?? "gpt-4o",
+    // 模型配置（provider/base_url/model/api_key）统一存于数据库 llm_model_configs，
+    // 不再从 .env 读取。proxyURL 为可选代理，仍由环境变量控制。
     proxyURL: process.env.LLM_PROXY_URL ?? "",
   },
   server: {
@@ -24,7 +23,6 @@ export const config = {
   },
   security: {
     authToken: process.env.APP_AUTH_TOKEN?.trim() ?? "",
-    jwtSecret: process.env.JWT_SECRET ?? "silver-wolf-default-secret",
   },
   smtp: {
     host: process.env.SMTP_HOST ?? "",

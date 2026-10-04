@@ -5,11 +5,13 @@ import {
   hashPassword,
   verifyPassword,
   generateToken,
+  hashToken,
   generateVerificationCode,
 } from "../utils/password.js";
 import { sendVerificationCode } from "../utils/email.js";
 
 const CODE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+const TOKEN_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 天登录令牌有效期
 const MAX_AVATAR_DATA_URL_LENGTH = 48 * 1024;
 
 type UserRole = "user" | "admin" | "super_admin";
@@ -24,11 +26,13 @@ interface AuthenticatedUserRow {
 }
 
 async function getUserByToken(token: string): Promise<AuthenticatedUserRow | null> {
+  const tokenHash = hashToken(token);
+  const now = new Date().toISOString();
   const result = await pool.query<AuthenticatedUserRow>(
     `SELECT u.id, u.email, u.display_name, u.avatar_url, u.role, u.created_at
      FROM user_tokens t JOIN users u ON t.user_id = u.id
-     WHERE t.token = $1`,
-    [token]
+     WHERE t.token = $1 AND t.expires_at > $2`,
+    [tokenHash, now]
   );
   return result.rows[0] ?? null;
 }
@@ -157,16 +161,20 @@ authRoute.post("/register", async (c) => {
     );
 
     // Generate token (replace any existing tokens)
+    // 数据库只存 SHA-256 哈希，明文令牌仅在本次响应中返回一次
     const token = generateToken();
+    const tokenHash = hashToken(token);
+    const expiresAt = new Date(Date.now() + TOKEN_TTL_MS).toISOString();
     await pool.query("DELETE FROM user_tokens WHERE user_id = $1", [userId]);
     await pool.query(
-      "INSERT INTO user_tokens (token, user_id, created_at) VALUES ($1, $2, $3)",
-      [token, userId, createdAt]
+      "INSERT INTO user_tokens (token, user_id, created_at, expires_at) VALUES ($1, $2, $3, $4)",
+      [tokenHash, userId, createdAt, expiresAt]
     );
 
     logger.info("auth", "user registered", { userId, email });
     return c.json({
       token,
+      expiresAt,
       user: {
         id: userId,
         email,
@@ -203,7 +211,11 @@ authRoute.post("/login", async (c) => {
       role: UserRole;
       created_at: string;
     }>(
-      "SELECT id, email, password_hash, display_name, avatar_url, role, created_at FROM users WHERE email = $1",
+       `SELECT id, email, password_hash, display_name, avatar_url, role, created_at
+       FROM users
+       WHERE email = $1 OR display_name = $1
+       ORDER BY (email = $1) DESC
+       LIMIT 1`,
       [account]
     );
 
@@ -213,17 +225,20 @@ authRoute.post("/login", async (c) => {
     }
 
     const token = generateToken();
+    const tokenHash = hashToken(token);
     const createdAt = new Date().toISOString();
+    const expiresAt = new Date(Date.now() + TOKEN_TTL_MS).toISOString();
     // Replace any existing tokens for this user
     await pool.query("DELETE FROM user_tokens WHERE user_id = $1", [user.id]);
     await pool.query(
-      "INSERT INTO user_tokens (token, user_id, created_at) VALUES ($1, $2, $3)",
-      [token, user.id, createdAt]
+      "INSERT INTO user_tokens (token, user_id, created_at, expires_at) VALUES ($1, $2, $3, $4)",
+      [tokenHash, user.id, createdAt, expiresAt]
     );
 
     logger.info("auth", "user logged in", { userId: user.id });
     return c.json({
       token,
+      expiresAt,
       user: {
         id: user.id,
         email: user.email,
@@ -325,7 +340,7 @@ authRoute.patch("/user", async (c) => {
 authRoute.post("/logout", async (c) => {
   const token = c.req.header("X-User-Token");
   if (token) {
-    await pool.query("DELETE FROM user_tokens WHERE token = $1", [token]);
+    await pool.query("DELETE FROM user_tokens WHERE token = $1", [hashToken(token)]);
   }
   return c.json({ message: "已退出登录" });
 });

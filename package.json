@@ -12,20 +12,22 @@
     "prestart:chat": "npm run build",
     "start:chat": "node dist/src/cli.js",
     "build": "tsc",
-    "test": "tsx --test --test-concurrency=1 tests/*.test.ts",
-    "test:intents": "tsx scripts/check-tool-router.ts",
+    "test": "node scripts/run-tests.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.8",
     "cheerio": "^1.2.0",
+    "docx": "^9.8.1",
     "dotenv": "^16.4.0",
     "hono": "^4.0.0",
     "https-proxy-agent": "^9.0.0",
     "nodemailer": "^8.0.11",
     "openai": "^4.70.0",
+    "pdfkit": "^0.20.2",
     "pg": "^8.22.0",
+    "pptxgenjs": "^4.0.1",
     "undici": "^7.8.0"
   },
   "devDependencies": {
@@ -33,6 +35,7 @@
     "@phosphor-icons/web": "^2.1.2",
     "@types/node": "^22.0.0",
     "@types/nodemailer": "^8.0.1",
+    "@types/pdfkit": "^0.17.6",
     "@types/pg": "^8.20.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0"

@@ -11,10 +11,18 @@ import { logger } from "../logger.js";
 // 重新导出 initDatabase，供 index.ts / cli.ts 统一从 conversation-store 导入
 export { initDatabase } from "./pool.js";
 
+/** 单条"查看过程"日志步骤 */
+export interface ProcessStep {
+  name: string;
+  content: string;
+}
+
 export interface StoredMessage extends Message {
   id: number;
   sessionId: string;
   createdAt: string;
+  /** 该条助手回复生成时的过程步骤（未保存时为 null） */
+  process?: ProcessStep[] | null;
 }
 
 export interface StoredSession {
@@ -56,6 +64,7 @@ interface MessageRow {
   role: Message["role"];
   content: string;
   created_at: string;
+  process?: unknown;
 }
 
 interface SessionRow {
@@ -185,7 +194,8 @@ export async function saveConversationTurn(
   sessionId: string,
   userMessage: string,
   assistantMessage: string,
-  ownerId = "local-default"
+  ownerId = "local-default",
+  process?: ProcessStep[] | null
 ): Promise<void> {
   const timestamp = now();
   const client = await pool.connect();
@@ -216,8 +226,14 @@ export async function saveConversationTurn(
       [sessionId, "user", userMessage, timestamp]
     );
     await client.query(
-      `INSERT INTO messages (session_id, role, content, created_at) VALUES ($1, $2, $3, $4)`,
-      [sessionId, "assistant", assistantMessage, now()]
+      `INSERT INTO messages (session_id, role, content, created_at, process) VALUES ($1, $2, $3, $4, $5)`,
+      [
+        sessionId,
+        "assistant",
+        assistantMessage,
+        now(),
+        process && process.length > 0 ? JSON.stringify(process) : null,
+      ]
     );
     await client.query("COMMIT");
   } catch (err) {
@@ -254,7 +270,7 @@ export async function getRecentStoredMessages(
 ): Promise<StoredMessage[]> {
   const result = await pool.query<MessageRow>(
     `
-      SELECT id, session_id, role, content, created_at
+      SELECT id, session_id, role, content, created_at, process
       FROM messages
       WHERE session_id = $1
       ORDER BY id DESC
@@ -269,6 +285,7 @@ export async function getRecentStoredMessages(
     role: row.role,
     content: row.content,
     createdAt: row.created_at,
+    process: parseProcess(row.process),
   }));
 }
 
@@ -343,15 +360,87 @@ export async function listSessions(limit = 50, ownerId?: string): Promise<Stored
   return result.rows.map(mapSessionRow);
 }
 
+/**
+ * 会话内容摘要：除会话元信息外，附带该会话的长期记忆摘要（若有）、
+ * 以及从真实用户消息聚合出的内容预览。
+ * 供"数据分析"模块对对话内容做总结与分类（基于内容，而非标题）。
+ */
+export interface SessionContentDigest {
+  id: string;
+  title: string;
+  updatedAt: string;
+  messageCount: number;
+  hasSummary: boolean;
+  /** 会话压缩后存储的长期记忆摘要（仅在对话超过压缩阈值后生成，可能为空） */
+  summaryContent: string | null;
+  /** 会话首条用户消息，用作无摘要时的内容预览 */
+  preview: string;
+  /** 会话真实内容代表：前若干条用户消息拼接，用于内容级分析（不依赖标题） */
+  contentDigest: string;
+}
+
+export async function listSessionContentDigests(
+  ownerId: string,
+  limit = 200
+): Promise<SessionContentDigest[]> {
+  const result = await pool.query<{
+    id: string;
+    title: string;
+    updated_at: string;
+    message_count: number;
+    has_summary: boolean;
+    summary_content: string | null;
+    preview: string | null;
+    content_digest: string | null;
+  }>(
+    `
+      SELECT
+        s.id,
+        s.title,
+        s.updated_at,
+        COUNT(m.id) AS message_count,
+        EXISTS(SELECT 1 FROM session_summaries ss WHERE ss.session_id = s.id) AS has_summary,
+        (SELECT ss.content FROM session_summaries ss WHERE ss.session_id = s.id) AS summary_content,
+        (SELECT ms.content FROM messages ms
+          WHERE ms.session_id = s.id AND ms.role = 'user'
+          ORDER BY ms.id LIMIT 1) AS preview,
+        (SELECT string_agg(substr(ms.content, 1, 80), ' / ')
+          FROM (
+            SELECT ms.id, ms.content FROM messages ms
+            WHERE ms.session_id = s.id AND ms.role = 'user'
+            ORDER BY ms.id LIMIT 3
+          ) ms) AS content_digest
+      FROM sessions s
+      LEFT JOIN messages m ON m.session_id = s.id
+      WHERE s.owner_id = $1
+      GROUP BY s.id
+      ORDER BY s.updated_at DESC
+      LIMIT $2
+    `,
+    [ownerId, limit]
+  );
+
+  return result.rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    updatedAt: row.updated_at,
+    messageCount: Number(row.message_count),
+    hasSummary: Boolean(row.has_summary),
+    summaryContent: row.summary_content ?? null,
+    preview: (row.preview ?? "").trim(),
+    contentDigest: (row.content_digest ?? "").trim(),
+  }));
+}
+
 export async function listSessionMessages(
   sessionId: string,
   limit = 200
 ): Promise<StoredMessage[]> {
   const result = await pool.query<MessageRow>(
     `
-      SELECT id, session_id, role, content, created_at
+      SELECT id, session_id, role, content, created_at, process
       FROM (
-        SELECT id, session_id, role, content, created_at
+        SELECT id, session_id, role, content, created_at, process
         FROM messages
         WHERE session_id = $1
         ORDER BY id DESC
@@ -368,6 +457,7 @@ export async function listSessionMessages(
     role: row.role,
     content: row.content,
     createdAt: row.created_at,
+    process: parseProcess(row.process),
   }));
 }
 
@@ -480,6 +570,20 @@ function parseStoredArray<T>(value: string, rowId: number, field: string): T[] {
   }
   logger.warn("database", "invalid tool run JSON ignored", { rowId, field });
   return [];
+}
+
+/** 解析 messages.process（jsonb 列），非法时返回 null */
+function parseProcess(value: unknown): ProcessStep[] | null {
+  if (value == null) return null;
+  if (typeof value === "string") {
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      return Array.isArray(parsed) ? (parsed as ProcessStep[]) : null;
+    } catch {
+      return null;
+    }
+  }
+  return Array.isArray(value) ? (value as ProcessStep[]) : null;
 }
 
 export async function saveToolRun<T>(input: {

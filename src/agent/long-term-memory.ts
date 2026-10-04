@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { pool } from "../db/pool.js";
 import { logger } from "../logger.js";
+import { hashToken } from "../utils/password.js";
 
 export type LongTermMemoryCategory =
   | "profile"
@@ -59,8 +60,11 @@ interface MemoryCandidate {
 
 const DEFAULT_OWNER_ID = "local-default";
 const MAX_MEMORY_CONTENT = 240;
-const META_RECALL_PATTERN = /(?:记得|记住|了解我|关于我|我的喜好|我的信息|我是谁)/;
+const META_RECALL_PATTERN = /(?:记得|记住|了解我|关于我|我的喜好|我的信息|我是谁|我叫什么|我叫啥|叫我什么|叫我啥|我的名字|称呼我|怎么称呼|我该叫|该叫我)/;
 const TRANSIENT_PATTERN = /(?:今天|刚才|现在正在|这会儿|临时|待会儿|马上)/;
+/** 疑问词 value：用户在提问而非陈述，不应被当成记忆写入 */
+const QUESTION_VALUE_PATTERN =
+  /^(什么|啥|谁|哪|哪里|哪儿|怎么|怎样|如何|为什么|为何|几|多少|吗|呢|吧|么)|(?:什么|啥|谁|哪|怎么|怎样|如何|为什么|为何)/;
 
 function now(): string {
   return new Date().toISOString();
@@ -86,20 +90,42 @@ function hashedKey(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 20);
 }
 
+/** 中文停用单字：出现在 2-gram 中时该 gram 无意义 */
+const CHINESE_STOP_CHARS = new Set([
+  "的", "了", "是", "我", "你", "他", "她", "它", "在", "有", "和", "与", "等",
+  "就", "都", "而", "及", "或", "也", "还", "又", "再", "已", "将", "把",
+  "被", "让", "使", "从", "向", "到", "对", "为", "以", "于", "因", "但",
+  "却", "这", "那", "个", "们", "着", "过", "吧", "吗", "呢", "啊", "呀",
+]);
+
 function keywordsFor(...values: string[]): string[] {
   const keywords = new Set<string>();
   const stopwords = new Set([
     "我", "我的", "自己", "一个", "一名", "比较", "非常", "真的", "以后",
     "希望", "记住", "记得", "喜欢", "不喜欢", "讨厌", "不要", "别再",
   ]);
+  const splitRe = /[\s，,。！？!?；;：:'"\u201c\u201d\u2018\u2019（）()【】\[\]<>《》/]+/;
   for (const value of values) {
-    for (const token of cleanValue(value).toLowerCase().split(/[\s，,。！？!?；;：:'"“”‘’（）()【】\[\]<>《》/]+/)) {
-      if (token.length >= 2 && !stopwords.has(token)) keywords.add(token.slice(0, 32));
+    const cleaned = cleanValue(value).toLowerCase();
+    for (const segment of cleaned.split(splitRe)) {
+      if (!segment || segment.length < 2 || stopwords.has(segment)) continue;
+      // 纯英文/数字段：保留整词
+      if (!/[\u4e00-\u9fa5]/.test(segment)) {
+        keywords.add(segment.slice(0, 32));
+        continue;
+      }
+      // 中文段：提取 2-gram（过滤含停用单字的），同时保留 2-8 字整段
+      for (let i = 0; i < segment.length - 1; i++) {
+        const gram = segment.slice(i, i + 2);
+        if (!CHINESE_STOP_CHARS.has(gram[0]) && !CHINESE_STOP_CHARS.has(gram[1])) {
+          keywords.add(gram);
+        }
+      }
+      if (segment.length <= 8) keywords.add(segment);
     }
   }
-  return [...keywords].slice(0, 12);
+  return [...keywords].slice(0, 16);
 }
-
 function candidate(
   category: LongTermMemoryCategory,
   key: string,
@@ -109,6 +135,8 @@ function candidate(
 ): MemoryCandidate | null {
   const cleaned = cleanValue(value);
   if (!cleaned || cleaned.length < 2) return null;
+  // 过滤疑问句："叫我什么""我喜欢什么""我是谁" 等是提问而非陈述
+  if (QUESTION_VALUE_PATTERN.test(cleaned)) return null;
   return {
     key,
     category,
@@ -274,9 +302,11 @@ export function extractMemoryCandidates(input: string): MemoryCandidate[] {
 
 export async function resolveMemoryOwnerId(token?: string | null): Promise<string | null> {
   if (!token) return DEFAULT_OWNER_ID;
+  const tokenHash = hashToken(token);
+  const now = new Date().toISOString();
   const result = await pool.query<{ user_id: string }>(
-    "SELECT user_id FROM user_tokens WHERE token = $1",
-    [token]
+    "SELECT user_id FROM user_tokens WHERE token = $1 AND expires_at > $2",
+    [tokenHash, now]
   );
   return result.rows[0]?.user_id ?? null;
 }
@@ -366,8 +396,16 @@ async function upsertCandidate(ownerId: string, sessionId: string, item: MemoryC
   return mapRow(result.rows[0]);
 }
 
+/**
+ * 遗忘指令模式。必须是祈使句，且位于句首或句号/标点之后；
+ * 用负向后行断言排除"别忘记/别忘了/没忘记"这类"要记住"的反义表达，
+ * 并用句首锚点排除"我忘记密码了"这类陈述句。
+ */
+const FORGET_COMMAND_PATTERN =
+  /(?:^|[。！？!?；;])\s*(?:(?:请|请你|麻烦你|帮我|帮我把)\s*)?(?<!别|不|没|可)(?:忘掉|忘记|不要记得|别记得|不记得了)[，,：:\s]*(.+)$/;
+
 export async function forgetMemoriesFromMessage(ownerId: string, input: string): Promise<number> {
-  const match = input.match(/(?:忘掉|忘记|不要记得|别记得)[，,：:\s]*(.+)$/);
+  const match = input.match(FORGET_COMMAND_PATTERN);
   if (!match) return 0;
   const target = cleanValue(match[1]);
   if (!target) return 0;

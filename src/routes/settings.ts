@@ -3,9 +3,9 @@ import OpenAI from "openai";
 import { HttpsProxyAgent } from "https-proxy-agent";
 import { config } from "../config.js";
 import {
-  compatibleModelTemplate,
   createLlmModelConfig,
   deepSeekTemplate,
+  compatibleModelTemplate,
   deleteLlmModelConfig,
   getActiveLlmModelConfig,
   getLlmModelConfig,
@@ -73,8 +73,8 @@ settingsRoute.get("/models", async (c) => {
     activeModel,
     models,
     templates: {
-      compatible: compatibleModelTemplate(),
       deepseek: deepSeekTemplate(),
+      compatible: compatibleModelTemplate(),
     },
   });
 });

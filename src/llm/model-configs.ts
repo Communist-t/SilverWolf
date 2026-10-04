@@ -1,10 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { pool } from "../db/pool.js";
-import { config } from "../config.js";
 
-const ENV_MODEL_ID = "env-default";
 const DEFAULT_DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1";
 const DEFAULT_COMPATIBLE_BASE_URL = "https://api.example.com/v1";
+
+// ── 短期缓存 ─────────────────────────────────────────────────
+// 对话热路径上每次 LLM 调用都会查询激活模型；
+// 用 TTL 缓存避免每轮对话都做数据库查询；
+// 所有模型配置变更入口都会主动失效缓存，保证配置修改尽快生效。
+const MODEL_CONFIG_CACHE_TTL_MS = 15_000;
+let activeModelCache: { expiresAt: number; config: LlmModelConfig } | null = null;
+
+function invalidateLlmModelCache(): void {
+  activeModelCache = null;
+}
 
 export interface LlmModelConfig {
   id: string;
@@ -21,6 +30,7 @@ export interface LlmModelConfig {
 
 export interface PublicLlmModelConfig extends Omit<LlmModelConfig, "apiKey"> {
   hasApiKey: boolean;
+  apiKey: string;
 }
 
 interface LlmModelConfigRow {
@@ -58,6 +68,36 @@ function inferProvider(baseURL: string, model: string): string {
   if (combined.includes("agnes")) return "Agnes";
   if (combined.includes("openai") || combined.includes("gpt-")) return "OpenAI";
   return "OpenAI 兼容";
+}
+
+/**
+ * 根据模型名和 provider 推断是否支持视觉（图片输入）。
+ * 纯文本模型收到 image_url 会被 API 序列化成 JSON 字符串，模型看不到图片。
+ */
+export function modelSupportsVision(model: string, provider?: string): boolean {
+  const m = model.toLowerCase();
+  const p = (provider ?? "").toLowerCase();
+  // 明确含视觉标识的模型名
+  const visionPatterns = [
+    /-vl/, /vl-/, /vision/, /visual/, /-v\d/, /multimodal/,
+    /gpt-4o/, /gpt-4-turbo/, /gpt-4\.1/, /gpt-4-vision/,
+    /claude-3/, /claude-sonnet-4/, /claude-opus-4/,
+    /gemini/, /gemma-3/,
+    /qwen.*vl/, /qwen2.*vl/, /qwen3.*vl/, /qwen-vl/,
+    /minimax.*vl/, /minimax.*vision/,
+    /llama3\.2.*vision/, /llama3\.2-90b/,
+    /glm-4v/, /glm-4-plus/,
+    /doubao.*vision/, /doubao.*vl/, /seedream/,
+    /deepseek-vl/,
+  ];
+  for (const re of visionPatterns) {
+    if (re.test(m)) return true;
+  }
+  // Provider 级推断：部分 provider 的旗舰模型默认支持视觉
+  if (p.includes("openai") && /gpt-4/.test(m)) return true;
+  if (p.includes("anthropic") && /claude-3/.test(m)) return true;
+  if (p.includes("google") && m.includes("gemini")) return true;
+  return false;
 }
 
 function isGenericAccessFormat(value: string): boolean {
@@ -116,8 +156,7 @@ function mapRow(row: LlmModelConfigRow): LlmModelConfig {
 }
 
 export function toPublicModelConfig(model: LlmModelConfig): PublicLlmModelConfig {
-  const { apiKey, ...safeModel } = model;
-  return { ...safeModel, hasApiKey: Boolean(apiKey.trim()) };
+  return { ...model, hasApiKey: Boolean(model.apiKey.trim()) };
 }
 
 async function activateFirstAvailableModel(excludedId?: string): Promise<void> {
@@ -141,83 +180,16 @@ async function activateFirstAvailableModel(excludedId?: string): Promise<void> {
       result.rows[0].id,
     ]);
     await client.query("COMMIT");
+    invalidateLlmModelCache();
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
   } finally {
     client.release();
   }
-}
-
-async function removeEnvironmentModelConfig(): Promise<void> {
-  const result = await pool.query<{ active: number }>(
-    "SELECT active FROM llm_model_configs WHERE id = $1",
-    [ENV_MODEL_ID]
-  );
-  if (result.rows.length === 0) return;
-
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-    if (result.rows[0].active) await activateFirstAvailableModel(ENV_MODEL_ID);
-    await client.query("DELETE FROM llm_model_configs WHERE id = $1", [ENV_MODEL_ID]);
-    await client.query("COMMIT");
-  } catch (err) {
-    await client.query("ROLLBACK");
-    throw err;
-  } finally {
-    client.release();
-  }
-}
-
-export async function seedEnvironmentModelConfig(): Promise<void> {
-  const envApiKey = config.llm.apiKey.trim();
-  if (!envApiKey) {
-    await removeEnvironmentModelConfig();
-    return;
-  }
-
-  const timestamp = now();
-  const activeResult = await pool.query<{ count: number }>(
-    "SELECT COUNT(*) AS count FROM llm_model_configs WHERE active = 1"
-  );
-  const existingResult = await pool.query<{ id: string }>(
-    "SELECT id FROM llm_model_configs WHERE id = $1",
-    [ENV_MODEL_ID]
-  );
-  const activeCount = Number(activeResult.rows[0].count);
-  const existing = existingResult.rows.length > 0;
-
-  await pool.query(
-    `
-      INSERT INTO llm_model_configs (
-        id, label, provider, base_url, model, api_key,
-        active, built_in, created_at, updated_at
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8, $9)
-      ON CONFLICT(id) DO UPDATE SET
-        provider = EXCLUDED.provider,
-        base_url = EXCLUDED.base_url,
-        model = EXCLUDED.model,
-        api_key = EXCLUDED.api_key,
-        updated_at = EXCLUDED.updated_at
-    `,
-    [
-      ENV_MODEL_ID,
-      "当前 .env 配置",
-      inferProvider(config.llm.baseURL, config.llm.model),
-      config.llm.baseURL,
-      config.llm.model,
-      envApiKey,
-      existing ? 0 : activeCount === 0 ? 1 : 0,
-      timestamp,
-      timestamp,
-    ]
-  );
 }
 
 export async function listLlmModelConfigs(): Promise<LlmModelConfig[]> {
-  await seedEnvironmentModelConfig();
   const result = await pool.query<LlmModelConfigRow>(
     "SELECT * FROM llm_model_configs ORDER BY active DESC, built_in DESC, updated_at DESC"
   );
@@ -225,17 +197,28 @@ export async function listLlmModelConfigs(): Promise<LlmModelConfig[]> {
 }
 
 export async function getActiveLlmModelConfig(): Promise<LlmModelConfig> {
-  await seedEnvironmentModelConfig();
+  if (activeModelCache && activeModelCache.expiresAt > Date.now()) {
+    return activeModelCache.config;
+  }
+
   const result = await pool.query<LlmModelConfigRow>(
     "SELECT * FROM llm_model_configs WHERE active = 1 LIMIT 1"
   );
-  if (result.rows.length > 0) return mapRow(result.rows[0]);
+  if (result.rows.length > 0) {
+    const configRow = mapRow(result.rows[0]);
+    activeModelCache = { expiresAt: Date.now() + MODEL_CONFIG_CACHE_TTL_MS, config: configRow };
+    return configRow;
+  }
 
   await activateFirstAvailableModel();
   const activated = await pool.query<LlmModelConfigRow>(
     "SELECT * FROM llm_model_configs WHERE active = 1 LIMIT 1"
   );
-  if (activated.rows.length > 0) return mapRow(activated.rows[0]);
+  if (activated.rows.length > 0) {
+    const configRow = mapRow(activated.rows[0]);
+    activeModelCache = { expiresAt: Date.now() + MODEL_CONFIG_CACHE_TTL_MS, config: configRow };
+    return configRow;
+  }
 
   throw new Error("没有可用的模型配置，请先在模型设置中新增 DeepSeek 配置。");
 }
@@ -260,6 +243,7 @@ export async function createLlmModelConfig(input: UpsertLlmModelInput): Promise<
     `,
     [id, label, provider, baseURL, model, input.apiKey.trim(), timestamp, timestamp]
   );
+  invalidateLlmModelCache();
 
   return (await getLlmModelConfig(id))!;
 }
@@ -297,11 +281,11 @@ export async function updateLlmModelConfig(
       id,
     ]
   );
+  invalidateLlmModelCache();
   return getLlmModelConfig(id);
 }
 
 export async function getLlmModelConfig(id: string): Promise<LlmModelConfig | null> {
-  await seedEnvironmentModelConfig();
   const result = await pool.query<LlmModelConfigRow>(
     "SELECT * FROM llm_model_configs WHERE id = $1",
     [id]
@@ -310,7 +294,6 @@ export async function getLlmModelConfig(id: string): Promise<LlmModelConfig | nu
 }
 
 export async function setActiveLlmModelConfig(id: string): Promise<LlmModelConfig | null> {
-  await seedEnvironmentModelConfig();
   const target = await getLlmModelConfig(id);
   if (!target) return null;
 
@@ -323,6 +306,7 @@ export async function setActiveLlmModelConfig(id: string): Promise<LlmModelConfi
       id,
     ]);
     await client.query("COMMIT");
+    invalidateLlmModelCache();
   } catch (err) {
     await client.query("ROLLBACK");
     throw err;
@@ -333,7 +317,6 @@ export async function setActiveLlmModelConfig(id: string): Promise<LlmModelConfi
 }
 
 export async function deleteLlmModelConfig(id: string): Promise<boolean> {
-  await seedEnvironmentModelConfig();
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -347,6 +330,7 @@ export async function deleteLlmModelConfig(id: string): Promise<boolean> {
       [id]
     );
     await client.query("COMMIT");
+    invalidateLlmModelCache();
     return (result.rowCount ?? 0) > 0;
   } catch (err) {
     await client.query("ROLLBACK");
@@ -358,7 +342,7 @@ export async function deleteLlmModelConfig(id: string): Promise<boolean> {
 
 export function deepSeekTemplate(): Pick<LlmModelConfig, "label" | "provider" | "baseURL" | "model"> {
   return {
-    label: "DeepSeek Flash",
+    label: "DeepSeek V4 Flash",
     provider: "DeepSeek",
     baseURL: DEFAULT_DEEPSEEK_BASE_URL,
     model: "deepseek-v4-flash",

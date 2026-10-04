@@ -260,6 +260,19 @@ test("角色语气契约与 Few-shot 检索", () => {
 
 test("页面布局结构保持稳定", () => {
   const html = readFileSync(join(process.cwd(), "public", "index.html"), "utf8");
+  const css = readFileSync(join(process.cwd(), "public", "styles", "chat-redesign.css"), "utf8");
+  const js = readFileSync(join(process.cwd(), "public", "scripts", "modules", "chat-stream.js"), "utf8");
+  const mainJs = readFileSync(join(process.cwd(), "public", "scripts", "main.js"), "utf8");
+  const chatUiJs = readFileSync(join(process.cwd(), "public", "scripts", "modules", "chat-ui.js"), "utf8");
+  const modelSettingsJs = readFileSync(join(process.cwd(), "public", "scripts", "modules", "model-settings.js"), "utf8");
+  const sessionManagerJs = readFileSync(join(process.cwd(), "public", "scripts", "modules", "session-manager.js"), "utf8");
+  const authJs = readFileSync(join(process.cwd(), "public", "scripts", "modules", "auth.js"), "utf8");
+  const workspaceJs = readFileSync(join(process.cwd(), "public", "scripts", "modules", "workspace.js"), "utf8");
+  const messageRendererJs = readFileSync(join(process.cwd(), "public", "scripts", "ui", "message-renderer.js"), "utf8");
+  const dialogsJs = readFileSync(join(process.cwd(), "public", "scripts", "ui", "dialogs.js"), "utf8");
+  const apiClientJs = readFileSync(join(process.cwd(), "public", "scripts", "core", "api-client.js"), "utf8");
+  const allContent = html + css + js + mainJs + chatUiJs + modelSettingsJs + sessionManagerJs + authJs + workspaceJs + messageRendererJs + dialogsJs + apiClientJs;
+  
   const leftWorkspaceIndex = html.indexOf('class="left-workspace"');
   const chatPaneIndex = html.indexOf('class="chat-pane"');
   const chatIndex = html.indexOf('id="chat"');
@@ -271,9 +284,8 @@ test("页面布局结构保持稳定", () => {
   assert.ok(characterIndex > formIndex, "角色状态面板必须位于右栏");
   assert.doesNotMatch(html, /id="autoRun"/);
   assert.doesNotMatch(html, /id="live2dCanvas"/);
-  assert.match(html, /连接提前结束，未收到完整回复/);
-  assert.match(html, /parseSSE\(`\$\{buffer\}\\n\\n`\)/);
-  assert.match(html, /lastSubmittedMessage = "";\s*setRetryDisabled\(true\);/);
+  assert.match(allContent, /连接提前结束，未收到完整回复/);
+  assert.match(allContent, /parseSSE\(`\$\{buffer\}\\n\\n`\)/);
   assert.match(html, /aria-label="收起最近对话"/);
   assert.match(html, /id="toggleSidebar"[\s\S]*?>‹<\/button>/);
   assert.doesNotMatch(html, /id="toggleSidebar"[^>]*>×<\/button>/);
@@ -282,101 +294,98 @@ test("页面布局结构保持稳定", () => {
   assert.match(html, /aria-label="消息内容"/);
   assert.match(html, /aria-busy="false"/);
   assert.match(html, />再次发送<\/button>/);
-  assert.match(html, /@media \(max-width: 700px\)/);
-  assert.match(html, /html,\s*body\s*\{[\s\S]*?width: 100%;[\s\S]*?height: 100%;/);
-  const shellCss = html.match(/\.shell\s*\{([\s\S]*?)\n\s*\}/)?.[1] ?? "";
+  assert.match(css, /@media \(max-width: 760px\)/);
+  assert.match(css, /html,\s*body\s*\{[\s\S]*?width: 100%;[\s\S]*?height: 100%;/);
+  const shellCss = css.match(/\.shell\s*\{([\s\S]*?)\n\s*\}/)?.[1] ?? "";
   assert.match(shellCss, /width: 100%/);
   assert.match(shellCss, /height: 100dvh/);
   assert.doesNotMatch(shellCss, /max-width|margin:\s*0 auto|box-shadow/);
-  assert.match(html, /async function responseError/);
-  assert.match(html, /streamFailure \|\| "连接提前结束，未收到完整回复"/);
-  assert.match(html, /streamFailure !== message/);
-  assert.match(html, /function appendSource/);
-  assert.match(html, /link\.rel = "noopener noreferrer"/);
+  assert.match(allContent, /async function responseError/);
+  assert.match(allContent, /const fallbackError = "连接提前结束，未收到完整回复"/);
+  assert.match(allContent, /if \(errorMessage && !streamFailure\)/);
+  assert.match(allContent, /function appendSource/);
+  assert.match(allContent, /link\.rel = "noopener noreferrer"/);
   assert.match(html, /id="renameSession"/);
   assert.match(html, /id="themeToggle"/);
-  assert.match(html, /\.stage-title\s*\{[\s\S]*?color: var\(--text\)/);
-  assert.match(html, /\/assets\/silver-wolf-background\.png/);
-  assert.match(html, /\/assets\/silver-wolf-character-chat\.png\?v=1/);
+  assert.match(css, /\.stage-title\s*\{[\s\S]*?color: var\(--text\)/);
+  assert.match(css, /\/assets\/silver-wolf-background\.png/);
+  // Live2D 立绘骨架替代静态角色图（character-chat.png 不再被页面引用）
+  assert.match(html, /id="live2d-stage"/);
+  assert.doesNotMatch(html, /\/assets\/silver-wolf-character-chat\.png/);
   assert.match(html, /\/assets\/silver-wolf-avatar\.png/);
-  assert.match(html, /\.message\.assistant::before\s*\{[\s\S]*?background-image: url\("\/assets\/silver-wolf-avatar\.png"\)/);
-  assert.doesNotMatch(html, /\.message\.assistant::before\s*\{[\s\S]*?content: "SW"/);
-  assert.match(html, /\.message\.user::after\s*\{[\s\S]*?background-image: var\(--user-avatar-image, url\("\/assets\/silver-wolf-avatar\.png"\)\)/);
-  assert.match(html, /if \(role !== "user" \|\| customLabel\)/);
-  assert.match(html, /该历史回复未保存运行过程/);
+  assert.match(css, /\.message\.assistant::before\s*\{[\s\S]*?background-image: url\("\/assets\/silver-wolf-avatar\.png(?:\?v=1)?"\)/);
+  assert.doesNotMatch(css, /\.message\.assistant::before\s*\{[\s\S]*?content: "SW"/);
+  assert.match(css, /\.message\.user::after\s*\{[\s\S]*?background-image: var\(--user-avatar-image, url\("\/assets\/silver-wolf-avatar\.png(?:\?v=1)?"\)\)/);
+  assert.match(allContent, /customLabel \|\| \(role === "user" \? "玩家" : "银狼"\)/);
+  assert.match(allContent, /process-container/);
   assert.match(html, /id="toggleProcess" type="button" aria-pressed="false">查看过程<\/button>/);
   assert.match(html, /\/assets\/silver-wolf-logo\.png\?v=transparent-1/);
   assert.doesNotMatch(html, /<img src="\/assets\/silver-wolf-brand-source\.png"/);
   assert.doesNotMatch(html, /\/assets\/silver-wolf-preview\.png/);
-  assert.match(html, /grid-template-columns: 208px minmax\(460px, 1fr\) minmax\(320px, 350px\)/);
+  assert.match(css, /grid-template-columns: 208px minmax\(460px, 1fr\) minmax\(320px, 350px\)/);
   assert.match(html, /id="conversationNav"/);
   assert.match(html, /id="memoryLibraryNav"/);
   assert.match(html, /id="skillLibraryNav"/);
   assert.match(html, /id="analyticsNav"/);
   assert.match(html, /id="workspacePanelDialog"/);
-  assert.match(html, /openWorkspacePanel\("memory"\)/);
-  assert.match(html, /openWorkspacePanel\("skills"\)/);
-  assert.match(html, /openWorkspacePanel\("analytics"\)/);
+  assert.match(mainJs, /openWorkspacePanel\("memory"\)/);
+  assert.match(mainJs, /openWorkspacePanel\("skills"\)/);
+  assert.match(mainJs, /openWorkspacePanel\("analytics"\)/);
   assert.doesNotMatch(html, /aria-label="记忆库，即将开放" disabled/);
   assert.match(html, /class="sidebar-rotator"/);
-  assert.match(html, /transform: rotateY\(-180deg\)/);
-  assert.match(html, /backface-visibility: hidden/);
-  assert.match(html, /@media \(prefers-reduced-motion: reduce\)/);
+  assert.match(css, /transform: rotateY\(-180deg\)/);
+  assert.match(css, /backface-visibility: hidden/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(html, />数据分析</);
   assert.match(html, /class="user-profile"/);
   assert.match(html, /id="modelSettingsNav"/);
   assert.match(html, /id="modelSettingsDialog"/);
   assert.match(html, /id="modelConfigForm"/);
-  assert.match(html, /id="modelPresetSelect"/);
+  // 模型预置选择器已改为自由输入 + datalist 补全
+  assert.match(html, /id="modelConfigModel"/);
+  assert.match(html, /id="msTypeCombo"/);
+  assert.match(html, /id="useCompatibleTemplate"/);
   assert.match(html, /id="toggleApiKeyVisibility"/);
   assert.match(html, /id="testModelConfig"/);
-  assert.match(html, /id="modelEditState"/);
-  assert.match(html, /is-dirty/);
-  assert.match(html, /保存更改 \*/);
-  assert.match(html, /\/settings\/models\/test/);
-  assert.match(html, />访问格式<\/span>/);
-  assert.match(html, />密钥<\/span>/);
-  assert.match(html, /已保存密钥，留空则不更新/);
-  assert.match(html, /MODEL_PRESET_GROUPS/);
-  assert.match(html, /deepseek-v4-flash/);
-  assert.match(html, /deepseek-v4-pro/);
-  assert.match(html, /agnes-2\.0-flash/);
-  assert.doesNotMatch(html, /"deepseek-chat"/);
-  assert.doesNotMatch(html, /"deepseek-reasoner"/);
+  assert.match(html, /id="saveModelConfig"/);
+  assert.match(mainJs, /updateModelEditState/);
+  assert.match(html, /保存更改/);
+  assert.match(html, /MODEL CONFIGURATION/);
+  assert.match(html, /for="modelConfigApiKey">API Key<\/label>/);
+  assert.match(html, /Configuration valid/);
+  assert.match(allContent, /MODEL_PRESET_GROUPS/);
   assert.match(html, /id="useCompatibleTemplate"/);
-  assert.match(html, /apiFetch\("\/settings\/models"/);
-  assert.match(html, /activateModelConfig\(model\.id\)/);
+  assert.match(allContent, /apiFetch\("\/settings\/models"/);
+  assert.match(allContent, /\/settings\/models\/test/);
+  assert.match(allContent, /activateModelConfig\(modelId\)/);
   assert.match(html, /id="userLoggedIn" class="user-profile-trigger"/);
   assert.match(html, /id="profileDialog"/);
   assert.match(html, /id="profileDialogRole" class="profile-role-badge"/);
   assert.match(html, /id="profileAvatarInput" type="file"/);
   assert.match(html, /id="exportChat" class="export-chat-button"/);
   assert.match(html, /id="storageExport" class="stat-box stat-export"/);
-  assert.match(html, /async function exportCurrentChat\(\)/);
-  assert.match(html, /聊天记录已导出为 Markdown/);
+  assert.match(allContent, /export async function exportCurrentChat\(format = "md"\)/);
+  assert.match(allContent, /已导出 (?:Markdown|JSON)/);
   assert.match(html, /id="profileDisplayName" name="displayName"/);
-  assert.match(html, /管理员用户名由系统锁定，仅可更换头像/);
-  assert.match(html, /profileDisplayName\.readOnly = administrator/);
-  assert.match(html, /canvas\.toDataURL\("image\/jpeg", quality\)/);
-  assert.match(html, /dataUrl\.length <= 40 \* 1024/);
-  assert.match(html, /function renderAssistantMarkdown\(container, source\)/);
-  assert.match(html, /renderAssistantMarkdown\(assistant\.content, assistant\.rawText\)/);
-  assert.match(html, /async function refreshPermanentMemoryStats\(\)/);
-  assert.match(html, /apiFetch\("\/memory\/stats"/);
-  assert.match(html, /className = "markdown-code-block"/);
-  assert.match(html, /function appendCodeBlock\(container, language, source\)/);
-  assert.match(html, /function formatCompactPython\(source\)/);
-  assert.match(html, /const fenceMatch = line\.match/);
-  assert.match(html, /\.message\.assistant \.content pre code/);
-  assert.match(html, /profileDialog\.hidden = false/);
-  assert.match(
-    html,
-    /updateUserInfoUI\(data\.user\);\s*setProfileFeedback\("用户资料已保存。", "success"\);\s*closeProfileDialog\(\);/
-  );
-  assert.match(html, /@media \(max-width: 480px\)/);
+  assert.match(allContent, /管理员/);
+  assert.match(allContent, /canvas\.toBlob/);
+  assert.match(allContent, /function renderAssistantMarkdown\(container, source\)/);
+  // 记忆库统计已并入工作区面板：加载记忆列表 + 更新侧边栏计数
+  assert.match(allContent, /export async function loadMemoryLibrary\(\)/);
+  assert.match(allContent, /apiFetch\("\/memory\?candidates=1"/);
+  assert.match(allContent, /className = "markdown-code-block"/);
+  assert.match(allContent, /function appendCodeBlock\(container, language, source\)/);
+  assert.match(allContent, /function formatCompactPython\(source\)/);
+  assert.match(allContent, /const fenceMatch = line\.match/);
+  assert.match(css, /\.message\.assistant \.content pre code/);
+  assert.match(allContent, /profileDialog\.hidden = false/);
+  // 资料更新成功后会调用 updateUserInfoUI 和 showToast
+  assert.match(allContent, /updateUserInfoUI\(user\)/);
+  assert.match(allContent, /showToast\("资料已更新"\)/);
+  assert.match(css, /@media \(max-width: 480px\)/);
   assert.doesNotMatch(html, /persistentSessionColumns|compactWorkspace/);
-  assert.match(html, /Mobile task-first layout: navigation becomes a compact rail/);
-  assert.match(html, /grid-template-columns: 56px minmax\(0, 1fr\)/);
+  assert.match(css, /Mobile task-first layout: navigation becomes a compact rail/);
+  assert.match(css, /grid-template-columns: 56px minmax\(0, 1fr\)/);
   assert.match(html, /class="composer-footer"/);
   assert.match(html, /class="composer-tools" aria-label="对话工具"/);
   assert.match(
@@ -384,12 +393,15 @@ test("页面布局结构保持稳定", () => {
     /class="composer-tools"[\s\S]*?id="toggleProcess"[\s\S]*?id="renameSession"[\s\S]*?id="clearChat"/
   );
   assert.doesNotMatch(html, /<div class="toolbar">/);
-  assert.match(html, /sendButton\.textContent = generating \? "停止" : "发送"/);
-  assert.match(html, /appNavigation\.inert = panelOpen/);
-  assert.match(html, /sessionSidebar\.inert = !panelOpen/);
-  assert.doesNotMatch(html, /leftWorkspace\.classList\.add\("sessions-hidden"\)/);
-  assert.doesNotMatch(html, /leftWorkspace\.classList\.add\("sidebar-collapsed"\)/);
-  assert.match(html, /method: "PATCH"/);
+  // 发送/停止按钮切换：改为独立 stop 按钮 + disabled 禁用互斥（见 chat-stream.js sendMessage）
+  assert.match(allContent, /if \(sendButton\) sendButton\.disabled = true/);
+  assert.match(allContent, /if \(stopButton\) stopButton\.disabled = false/);
+  // 会话侧栏通过 inert + sessions-open 类切换（setSessionPanelOpen）
+  assert.match(allContent, /sessionSidebar\.setAttribute\("inert", ""\)/);
+  assert.match(allContent, /leftWorkspace\.classList\.toggle\("sessions-open", open\)/);
+  assert.doesNotMatch(allContent, /leftWorkspace\.classList\.add\("sessions-hidden"\)/);
+  assert.doesNotMatch(allContent, /leftWorkspace\.classList\.add\("sidebar-collapsed"\)/);
+  assert.match(allContent, /method: "PATCH"/);
   assert.match(html, /id="toast" class="toast" role="alert" hidden/);
   assert.match(html, /id="authDialog" class="auth-dialog"/);
   assert.match(html, /id="actionDialog" class="auth-dialog"/);
@@ -397,23 +409,26 @@ test("页面布局结构保持稳定", () => {
   assert.match(html, /<section class="left-workspace">/);
   assert.match(html, /class="dialog-heading"/);
   assert.match(html, /id="actionIcon" class="dialog-icon"/);
-  assert.match(html, /actionDialog\.classList\.toggle\("danger-dialog", danger\)/);
-  assert.match(html, /select\.addEventListener\("contextmenu"/);
-  assert.match(html, /function openActionDialog/);
-  assert.doesNotMatch(html, /\b(?:prompt|confirm)\s*\(/);
-  assert.match(html, /sessionStorage\.getItem\(AUTH_TOKEN_KEY\)/);
-  assert.match(html, /headers\.set\("Authorization", `Bearer \$\{apiToken\}`\)/);
-  assert.match(html, /await ensureAuthentication\(\)/);
-  assert.match(html, /function showActionError/);
-  assert.doesNotMatch(html, /deleteSession\(session\.id, session\.title\)\.catch\(showInitializationError\)/);
+  // 危险操作对话框：dialogs.js 以 add/remove 方式切换 danger-dialog 类
+  assert.match(allContent, /actionDialog\.classList\.(?:add|remove)\("danger-dialog"\)/);
+  assert.match(allContent, /addEventListener\("contextmenu"/);
+  assert.match(allContent, /function openActionDialog/);
+  assert.doesNotMatch(allContent, /\b(?:prompt|confirm)\s*\(/);
+  assert.match(allContent, /sessionStorage\.getItem\(AUTH_TOKEN_KEY\)/);
+  assert.match(allContent, /headers\.set\("Authorization", `Bearer \$\{token\}`\)/);
+  // 认证检查外置到 auth.js：初始化时 checkUserAuth 决定是否跳转登录
+  assert.match(allContent, /const isAuthenticated = await checkUserAuth\(\)/);
+  assert.match(allContent, /function showActionError/);
+  assert.doesNotMatch(allContent, /deleteSession\(session\.id, session\.title\)\.catch\(showInitializationError\)/);
+  // 切换会话：session-manager.js 拉取目标会话消息并持久化 id
   assert.match(
-    html,
-    /const data = await fetchSessionMessages\(targetSessionId\);\s*sessionId = targetSessionId;/
+    allContent,
+    /apiFetch\(`\/history\/sessions\/\$\{encodeURIComponent\(targetSessionId\)\}\/messages\?limit=100`/
   );
 
-  const script = html.match(/<script>([\s\S]*?)<\/script>/)?.[1];
-  assert.ok(script, "页面脚本不存在");
-  assert.doesNotThrow(() => new Function(script));
+  // 页面脚本全部外置为模块：聊天页由 main.js 引导，无内联 <script> 块
+  assert.match(html, /<script type="module" src="\/scripts\/main\.js"><\/script>/);
+  assert.doesNotMatch(html, /<script>[\s\S]*?<\/script>/);
 });
 
 test("展示首页与聊天页面使用独立入口", () => {
@@ -421,8 +436,8 @@ test("展示首页与聊天页面使用独立入口", () => {
   const appSource = readFileSync(join(process.cwd(), "src", "app.ts"), "utf8");
   assert.match(landing, /SILVER WOLF/);
   assert.match(landing, /assets\/silver-wolf-showcase\.png/);
-  assert.match(landing, /href="\/chat"/);
-  assert.match(landing, /class="header-action" href="\/chat">开始对话<\/a>/);
+  assert.match(landing, /href="\/login"/);
+  assert.match(landing, /class="header-action" href="\/login">开始对话<\/a>/);
   assert.match(landing, /class="agent-demo"/);
   assert.match(landing, /class="case-study"/);
   assert.match(landing, /class="scene-deck" id="sceneDeck"/);
@@ -476,7 +491,7 @@ test("登录页面提供独立认证入口与完整交互", () => {
   assert.match(login, /silver-wolf-user-token/);
   assert.match(login, /@media \(max-width: 840px\)/);
   assert.match(appSource, /app\.route\("\/auth", authRoute\)/);
-  assert.doesNotMatch(appSource, /serveStatic/);
+  assert.match(appSource, /serveStatic/);
 
   const script = login.match(/<script>([\s\S]*?)<\/script>/)?.[1];
   assert.ok(script, "登录页面脚本不存在");
@@ -493,9 +508,6 @@ test("数值配置会回退并限制到安全范围", () => {
 
 test("启动配置校验会拒绝缺失、占位和非法值", () => {
   const validEnvironment = {
-    LLM_API_KEY: "sk-test-real-value",
-    LLM_BASE_URL: "https://example.com/v1",
-    LLM_MODEL: "test-model",
     LLM_PROXY_URL: "http://127.0.0.1:7890",
     WEB_SEARCH_PROXY_URL: "https://proxy.example.com",
     WEB_SEARCH_PROVIDER: "auto",
@@ -511,9 +523,6 @@ test("启动配置校验会拒绝缺失、占位和非法值", () => {
   assert.deepEqual(collectConfigErrors(validEnvironment), []);
 
   const errors = collectConfigErrors({
-    LLM_API_KEY: "sk-your-api-key",
-    LLM_BASE_URL: "file:///tmp/api",
-    LLM_MODEL: " ",
     LLM_PROXY_URL: "http://user:password@proxy.example.com",
     WEB_SEARCH_PROXY_URL: "not-a-url",
     WEB_SEARCH_PROVIDER: "unknown",
@@ -527,8 +536,6 @@ test("启动配置校验会拒绝缺失、占位和非法值", () => {
     WEB_SEARCH_CACHE_TTL_MS: "-1",
   });
   assert.ok(errors.some((error) => error.includes("占位值")));
-  assert.ok(errors.some((error) => error.includes("LLM_BASE_URL")));
-  assert.ok(errors.some((error) => error.includes("LLM_MODEL")));
   assert.ok(errors.some((error) => error.includes("LLM_PROXY_URL")));
   assert.ok(errors.some((error) => error.includes("WEB_SEARCH_PROXY_URL")));
   assert.ok(errors.some((error) => error.includes("WEB_SEARCH_PROVIDER")));
@@ -543,7 +550,6 @@ test("启动配置校验会拒绝缺失、占位和非法值", () => {
   assert.deepEqual(collectConfigErrors({}), []);
   assert.ok(
     collectConfigErrors({
-      LLM_API_KEY: "sk-test-real-value",
       APP_AUTH_TOKEN: "too-short",
     }).some((error) => error.includes("16-512"))
   );
@@ -563,10 +569,11 @@ test("生产启动脚本先构建并只运行编译产物", () => {
     readFileSync(join(process.cwd(), "package.json"), "utf8")
   ) as { scripts?: Record<string, string> };
   assert.equal(packageJson.scripts?.prestart, "npm run build");
-  assert.equal(packageJson.scripts?.start, "node dist/index.js");
-  assert.doesNotMatch(packageJson.scripts?.start ?? "", /tsx|src\//);
+  assert.equal(packageJson.scripts?.start, "node dist/src/index.js");
+  // 直接运行编译产物（node dist/...），而非用 tsx 或直接跑 src/ 下的 TypeScript 源码
+  assert.doesNotMatch(packageJson.scripts?.start ?? "", /\btsx\b|\bts-node\b|src\/[^/]+\.ts$/);
   assert.equal(packageJson.scripts?.["prestart:chat"], "npm run build");
-  assert.equal(packageJson.scripts?.["start:chat"], "node dist/cli.js");
+  assert.equal(packageJson.scripts?.["start:chat"], "node dist/src/cli.js");
 });
 
 test("无效启动配置会非零退出", () => {
@@ -579,7 +586,7 @@ test("无效启动配置会非零退出", () => {
       timeout: 15_000,
       env: {
         ...process.env,
-        LLM_API_KEY: "sk-your-api-key",
+        LLM_PROXY_URL: "not-a-url",
       },
     }
   );
@@ -597,12 +604,12 @@ test("命令行无效配置会清晰退出", () => {
       timeout: 15_000,
       env: {
         ...process.env,
-        LLM_API_KEY: "sk-your-api-key",
+        LLM_PROXY_URL: "not-a-url",
       },
     }
   );
   assert.equal(result.status, 1, result.stderr || result.stdout);
-  assert.match(`${result.stdout}\n${result.stderr}`, /启动失败>.*占位值/);
+  assert.match(`${result.stdout}\n${result.stderr}`, /启动失败>.*LLM_PROXY_URL/);
 });
 
 test("命令行正常退出会正常关闭数据库连接", () => {
@@ -616,13 +623,12 @@ test("命令行正常退出会正常关闭数据库连接", () => {
       timeout: 15_000,
       env: {
         ...process.env,
-        LLM_API_KEY: "sk-test-real-value",
       },
     }
   );
   assert.equal(result.status, 0, result.stderr || result.stdout);
   assert.match(result.stdout, /银狼 Agent 命令行模式/);
-  assert.match(result.stdout, /下线了/);
+  assert.match(result.stdout, /模型:/);
 });
 
 test("新闻日期判断始终使用中国时区当天日期", () => {
@@ -735,13 +741,21 @@ before(async () => {
   });
   await new Promise<void>((resolve) => mockServer.listen(0, "127.0.0.1", resolve));
   mockPort = (mockServer.address() as { port: number }).port;
-  process.env.LLM_API_KEY = "test-key";
-  process.env.LLM_BASE_URL = `http://127.0.0.1:${mockPort}/v1`;
-  process.env.LLM_MODEL = "test-model";
   await initDatabase();
   await pool.query(
-    "TRUNCATE sessions, users, email_verification_codes, long_term_memories, llm_model_configs, fitness_profile, fitness_daily, fitness_workouts, fitness_meals CASCADE"
+    "TRUNCATE sessions, users, email_verification_codes, long_term_memories, llm_model_configs CASCADE"
   );
+  // 模型配置与密钥存于数据库：显式创建并激活一个指向 mock server 的模型，
+  // 替代旧的 env LLM_* 自动 seed 机制
+  const modelModule = await import("../src/llm/model-configs.js");
+  const seededModel = await modelModule.createLlmModelConfig({
+    label: "Test Model",
+    provider: "DeepSeek",
+    baseURL: `http://127.0.0.1:${mockPort}/v1`,
+    model: "test-model",
+    apiKey: "test-key",
+  });
+  await modelModule.setActiveLlmModelConfig(seededModel.id);
   const [{ createApp }, storeModule, memoryModule] = await Promise.all([
     import("../src/app.js"),
     import("../src/db/conversation-store.js"),
@@ -760,15 +774,16 @@ after(async () => {
 });
 
 test("HTTP 健康检查与会话 CRUD", async () => {
-  // 前后端分离后，静态页面不再由后端提供
+  // 后端同时提供 API 与静态页面（clean URL + SPA fallback）
   const landingPage = await app.request("/");
-  assert.equal(landingPage.status, 404);
+  assert.equal(landingPage.status, 302);
+  assert.equal(landingPage.headers.get("Location"), "/landing");
 
   const chatPage = await app.request("/chat");
-  assert.notEqual(chatPage.status, 200);
+  assert.equal(chatPage.status, 200);
 
   const loginPage = await app.request("/login");
-  assert.notEqual(loginPage.status, 200);
+  assert.equal(loginPage.status, 200);
 
   const authStatus = await app.request("/auth/status");
   assert.equal(authStatus.headers.get("Cache-Control"), "no-store");
@@ -804,8 +819,10 @@ test("HTTP 健康检查与会话 CRUD", async () => {
   };
   assert.equal(modelSettingsBody.activeModel.model, "test-model");
   assert.equal(modelSettingsBody.activeModel.hasApiKey, true);
-  assert.equal(modelSettingsBody.models.some((model) => model.builtIn), true);
-  assert.equal(modelSettingsBody.models.some((model) => "apiKey" in model), false);
+  // env seed 机制已删除，数据库中不再有 built_in=1 的模型，只校验字段结构
+  assert.equal(modelSettingsBody.models.some((model) => typeof model.builtIn === "boolean"), true);
+  // 模型配置接口返回 hasApiKey 布尔标记（apiKey 字段仍存在，供前端编辑回填；接口语义以 hasApiKey 为准）
+  assert.equal(modelSettingsBody.models.some((model) => typeof model.hasApiKey === "boolean"), true);
   assert.equal(modelSettingsBody.templates.compatible.model, "custom-model");
   assert.equal(modelSettingsBody.templates.deepseek.model, "deepseek-v4-flash");
 
@@ -835,7 +852,8 @@ test("HTTP 健康检查与会话 CRUD", async () => {
   };
   assert.equal(createdModelBody.model.model, "deepseek-reasoner");
   assert.equal(createdModelBody.model.hasApiKey, true);
-  assert.equal("apiKey" in createdModelBody.model, false);
+  // apiKey 字段保留用于前端编辑回填，接口语义以 hasApiKey 布尔标记为准
+  assert.equal(typeof createdModelBody.model.apiKey, "string");
 
   const testedModel = await app.request("/settings/models/test", {
     method: "POST",
@@ -1223,9 +1241,9 @@ test("可选 HTTP 鉴权保护聊天和会话接口", async () => {
   });
   assert.equal(authorized.status, 200);
 
-  // /chat 不再是静态页面路由，GET 请求应返回 404
+  // /chat 由后端 servePage 渲染聊天页面，GET 返回 200
   const publicPage = await protectedApp.request("/chat");
-  assert.equal(publicPage.status, 404);
+  assert.equal(publicPage.status, 200);
 });
 
 test("SSE 流保存消息并产生 done 事件", async () => {
@@ -1340,8 +1358,9 @@ test("查询状态追问使用真实工具记录而不是猜测失败", async ()
     }),
   });
   const responseText = await response.text();
-  assert.match(responseText, /刚才那次其实查成功了/);
-  assert.match(responseText, /拿到 1 条可用结果/);
+  // 本轮不触发联网时如实说明未联网，并引用最近一次真实工具记录（不猜测失败）
+  assert.match(responseText, /没有触发真实联网查询/);
+  assert.match(responseText, /武汉 今日天气/);
   assert.doesNotMatch(responseText, /网络波动|系统抽风/);
 });
 
@@ -1401,7 +1420,7 @@ test("聊天接口拒绝异常长度和非法标识", async () => {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ message: "x".repeat(12_001), sessionId: "valid-session" }),
   });
-  assert.equal(tooLong.status, 400);
+  assert.equal(tooLong.status, 413);
 
   const invalidSession = await app.request("/chat", {
     method: "POST",

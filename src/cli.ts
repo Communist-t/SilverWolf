@@ -7,7 +7,7 @@
 
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
-import { config, validateConfig } from "./config.js";
+import { validateConfig } from "./config.js";
 
 async function runCli(): Promise<void> {
   try {
@@ -28,7 +28,16 @@ async function runCli(): Promise<void> {
     const rl = createInterface({ input, output });
 
     console.log("\n银狼 Agent 命令行模式");
-    console.log(`模型: ${config.llm.model}`);
+    // 模型配置与密钥统一存于数据库 llm_model_configs，此处读取当前激活模型
+    let modelLabel = "（数据库配置）";
+    try {
+      const { getActiveLlmModelConfig } = await import("./llm/model-configs.js");
+      const active = await getActiveLlmModelConfig();
+      modelLabel = `${active.label} / ${active.model}`;
+    } catch {
+      // 无可用配置时保持默认提示
+    }
+    console.log(`模型: ${modelLabel}`);
     console.log("输入 exit / quit 退出，输入 clear 清空本轮会话记忆。\n");
 
     try {

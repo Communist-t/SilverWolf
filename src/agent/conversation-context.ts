@@ -123,6 +123,27 @@ function extractHardwareKeywords(text: string): string[] {
   return uniq(keywords);
 }
 
+/**
+ * 从近期用户消息中提取"查询对象"实体（如软件名 CatNote、工具名等），
+ * 用于让"找个下载链接/怎么下载"这类省略主题的追问继承前文话题。
+ */
+function extractLookupTopic(text: string): string {
+  // 1) 英文/数字实体，且出现在"软件/下载/笔记/查询/是啥/是什么"等语境附近
+  for (const match of text.matchAll(/[A-Za-z][A-Za-z0-9.\-]{1,40}/g)) {
+    const token = match[0];
+    const index = match.index ?? 0;
+    const around = text.slice(Math.max(0, index - 20), index + token.length + 20);
+    if (/软件|应用|app|工具|笔记|下载|官网|查询|是啥|是什么|干啥|干嘛|链接|渠道/i.test(around)) {
+      return token;
+    }
+  }
+  // 2) 中文：X软件 / X应用 / XApp / X笔记 / X工具 / X浏览器（X不含指示词）
+  const chinese = text.match(/([\u4e00-\u9fa5A-Za-z0-9]{1,12}?)(?:软件|应用|app|工具|笔记|浏览器|助手|插件)/i);
+  if (chinese && chinese[1] && !/的|这个|那个|什么|哪个|啥/.test(chinese[1])) {
+    return chinese[1];
+  }
+  return "";
+}
 export function extractConversationContext(
   messages: Message[],
   currentMessage: string
@@ -221,12 +242,16 @@ export function extractConversationContext(
         ? `当前句首的“我去”是口语感叹，不表示玩家要前往${locationContext.travelDestination ?? "某地"}。`
         : "",
     ].filter(Boolean);
+    const lookupTopic = extractLookupTopic(recentUserText);
     return {
       topic: "general",
       facts: locationFacts,
-      keywords: [],
-      searchHints: [],
-      summaryText: locationFacts.join("\n"),
+      keywords: lookupTopic ? [lookupTopic] : [],
+      searchHints: lookupTopic ? [lookupTopic] : [],
+      summaryText: [
+        ...locationFacts,
+        lookupTopic ? `近期讨论的查询对象是${lookupTopic}，追问下载/用法时继续围绕它。` : "",
+      ].filter(Boolean).join("\n"),
       ...locationContext,
     };
   }

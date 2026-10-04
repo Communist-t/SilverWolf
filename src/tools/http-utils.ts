@@ -61,10 +61,15 @@ export async function withRetry<T>(
         error: error instanceof Error ? error.message : String(error),
       });
       await new Promise<void>((resolve, reject) => {
+        // 信号可能在尝试失败与等待之间就已中止，需立即拒绝
+        if (signal?.aborted) {
+          reject(signal.reason ?? new Error("aborted"));
+          return;
+        }
         const timer = setTimeout(resolve, 250 * (attempt + 1));
         signal?.addEventListener("abort", () => {
           clearTimeout(timer);
-          reject(signal.reason);
+          reject(signal.reason ?? new Error("aborted"));
         }, { once: true });
       });
     }

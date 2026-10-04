@@ -26,16 +26,6 @@ export function collectConfigErrors(
   env: Record<string, string | undefined>
 ): string[] {
   const errors: string[] = [];
-  const apiKey = env.LLM_API_KEY?.trim() ?? "";
-  if (apiKey && /your[-_ ]?api[-_ ]?key|replace[-_ ]?me|sk-your/i.test(apiKey)) {
-    errors.push("LLM_API_KEY 仍是示例占位值");
-  }
-
-  const baseURL = env.LLM_BASE_URL?.trim() || "https://api.openai.com/v1";
-  if (!validHttpUrl(baseURL)) errors.push("LLM_BASE_URL 必须是有效的 HTTP(S) URL");
-  if (env.LLM_MODEL !== undefined && !env.LLM_MODEL.trim()) {
-    errors.push("LLM_MODEL 不能为空");
-  }
 
   const host = env.HOST?.trim();
   if (
