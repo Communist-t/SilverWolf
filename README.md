@@ -46,7 +46,7 @@
 ### 🔐 用户认证
 
 - 邮箱注册 + 验证码
-- JWT 令牌登录
+- 令牌登录（数据库会话令牌，SHA-256 哈希存储、30 天过期）
 - 用户信息管理（头像、昵称）
 - 可选 APP_AUTH_TOKEN 保护所有接口
 
@@ -71,7 +71,8 @@ cd SilverWolf
 
 # 配置环境变量
 cp .env.example .env
-# 编辑 .env，填入 LLM_API_KEY 等配置
+# 编辑 .env，填入 DATABASE_URL 等配置
+# 大模型密钥不再放 .env：启动后在「模型设置」接口（/settings/models）中新增并激活模型配置
 
 # 一键启动（PostgreSQL + 后端 + 前端）
 docker compose up -d
@@ -93,7 +94,8 @@ npm install
 
 # 配置环境变量
 cp .env.example .env
-# 编辑 .env，填入 DATABASE_URL、LLM_API_KEY 等
+# 编辑 .env，填入 DATABASE_URL 等配置
+# 大模型密钥（apiKey/baseURL/model）统一存于数据库 llm_model_configs，由 /settings/models 管理
 
 # 初始化数据库（首次运行）
 # 确保 PostgreSQL 已启动，建表会在服务启动时自动执行
@@ -160,8 +162,7 @@ SilverWolf/
 │   │   ├── auth.ts               # 登录/注册/验证码
 │   │   ├── history.ts            # 会话历史 CRUD
 │   │   ├── settings.ts           # 模型配置 API
-│   │   ├── memory.ts             # 长期记忆 API
-│   │   └── fitness.ts            # 健康追踪 API
+│   │   └── memory.ts             # 长期记忆 API
 │   │
 │   ├── tools/                    # 工具层
 │   │   ├── tool-router.ts        # 意图判断 + 工具路由
@@ -172,7 +173,7 @@ SilverWolf/
 │   │
 │   └── utils/                    # 工具模块
 │       ├── auth.ts               # Bearer Token 鉴权
-│       ├── password.ts           # 密码哈希/JWT/验证码
+│       ├── password.ts           # 密码哈希/令牌哈希/验证码
 │       ├── email.ts              # SMTP 邮件发送
 │       └── ...                   # 其他工具
 │
@@ -245,16 +246,15 @@ SilverWolf/
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| `LLM_API_KEY` | 大模型 API Key | — |
-| `LLM_BASE_URL` | API 地址 | `https://api.openai.com/v1` |
-| `LLM_MODEL` | 模型 ID | `gpt-4o` |
 | `DATABASE_URL` | PostgreSQL 连接串 | `postgres://silverwolf:...@127.0.0.1:5432/silver_wolf_agent` |
 | `PORT` | 服务端口 | `3000` |
 | `HOST` | 监听地址 | `0.0.0.0` |
 | `APP_AUTH_TOKEN` | 接口访问令牌（可选） | — |
-| `JWT_SECRET` | JWT 签名密钥 | — |
 | `SMTP_HOST` | SMTP 服务器 | — |
 | `WEB_SEARCH_PROVIDER` | 搜索引擎 | `auto` |
+| `LLM_PROXY_URL` | 模型访问代理（可选） | — |
+
+> 大模型 API Key、baseURL、模型名统一存储在数据库 `llm_model_configs` 表中（接口：`/settings/models`），不再通过环境变量配置。
 
 ---
 
@@ -316,10 +316,14 @@ docker compose -f docker-compose.dev.yml up -d
 | 容器化 | Docker + Docker Compose + Nginx |
 | 邮件 | nodemailer |
 | 搜索 | Tavily / Brave / DuckDuckGo |
-| 安全 | Bearer Token / JWT / CSP |
+| 安全 | Bearer Token / 数据库会话令牌 / CSP |
 
 ---
 
 ## 📄 License
 
 MIT
+
+---
+
+> 📌 本项目包含的 Live2D 模型、角色图片等素材为**同人二创用途**（非商业），版权归《崩坏：星穹铁道》版权方所有，详见 [素材版权声明](素材版权声明.md)。如涉及侵权请联系删除。
