@@ -17,6 +17,7 @@ RUN npm install -g nodemon
 # 只拷贝运行时需要的非 TS 资源
 COPY db/ ./db/
 COPY data/ ./data/
+COPY public/ ./public/
 
 # nodemon 配置：轮询模式，监听 src/ 和 skills/ 目录
 COPY <<EOF /app/nodemon.json

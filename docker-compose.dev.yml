@@ -40,6 +40,7 @@ services:
       HOST: 0.0.0.0
       # 容器内通过服务名 postgres 连接数据库
       DATABASE_URL: postgres://silverwolf:silverwolf_dev_2026@postgres:5432/silver_wolf_agent
+      APP_AUTH_TOKEN: demo-token-2024-secure
     ports:
       - "3000:3000"
     volumes:
@@ -59,7 +60,7 @@ services:
     container_name: silver-wolf-frontend-dev
     restart: unless-stopped
     environment:
-      API_BASE: ${API_BASE:-http://localhost:3000}
+      API_BASE: http://localhost:3000
       FRONTEND_BASE: ${FRONTEND_BASE:-}
     ports:
       - "8080:80"

@@ -20,6 +20,7 @@ yarn-debug.log*
 yarn-error.log*
 .cache/
 .turbo/
+.npm-cache/
 
 # OS / editor
 .DS_Store
@@ -42,3 +43,21 @@ __pycache__/
 
 # Codex
 .codex-run/
+
+# DSH ACL 诊断/修复产物（可还原，不应提交）
+acl-report-*.jsonl
+acl-backup-*.json
+acl-backup-*.json.ps1
+
+# 数据库结构审计产物（本地保留，不入库）
+database-audit/
+
+# 根目录临时调试脚本（本地保留，不入库）
+_inspect-db.mjs
+_list-models.cjs
+_purge-users2.mjs
+
+# 设计审计调试脚本/输出（本地保留，不入库）
+docunment/04-design-audit/_ui-*.cjs
+docunment/04-design-audit/_ui-*.txt
+docunment/04-design-audit/_wait-docker.cjs
