@@ -8,8 +8,8 @@
       content="登录 Silver Wolf AI Agent System，连接你的智能伙伴。"
     />
     <title>登录 | Silver Wolf AI Agent System</title>
-    <script src="/config.js"></script>
-    <link rel="stylesheet" href="/vendor/phosphor/style.css" />
+    <script src="/config.js?v=1"></script>
+    <link rel="stylesheet" href="/vendor/phosphor/style.css?v=1" />
     <style>
       :root {
         color-scheme: light;
@@ -40,7 +40,7 @@
         margin: 0;
         overflow-x: hidden;
         color: var(--ink);
-        background: #f8f7ff url("/assets/silver-wolf-login-scene.jpg") center / cover fixed;
+        background: #f8f7ff url("/assets/silver-wolf-login-scene.jpg?v=1") center / cover fixed;
         font-family:
           Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
           "Segoe UI", "Microsoft YaHei", sans-serif;
@@ -680,7 +680,7 @@
 
       @media (max-width: 840px) {
         body {
-          background-image: url("/assets/silver-wolf-background.png");
+          background-image: url("/assets/silver-wolf-background.png?v=1");
           background-position: 34% center;
         }
 
@@ -814,7 +814,7 @@
       }
 
       html[data-theme="dark"] body {
-        background: #111218 url("/assets/silver-wolf-login-scene.jpg") center / cover fixed;
+        background: #111218 url("/assets/silver-wolf-login-scene.jpg?v=1") center / cover fixed;
       }
 
       html[data-theme="dark"] .login-shell::before {
@@ -960,7 +960,7 @@
           <section class="auth-card" aria-labelledby="authTitle">
             <header class="card-heading">
               <span class="card-mark" aria-hidden="true">
-                <img src="/assets/silver-wolf-logo-trimmed.png" alt="" />
+                <img src="/assets/silver-wolf-logo-trimmed.png?v=1" alt="" />
               </span>
               <span class="card-heading-copy">
                 <p class="eyebrow" id="authEyebrow">WELCOME BACK,</p>
@@ -978,7 +978,7 @@
               <div id="loginFields" class="field-stack">
                 <label class="field">
                   <i class="ph ph-user" aria-hidden="true"></i>
-                  <input id="loginAccount" name="account" type="email" autocomplete="username" placeholder="用户名 / 邮箱 / 手机号" aria-label="用户名、邮箱或手机号" />
+                  <input id="loginAccount" name="account" type="text" autocomplete="username" placeholder="邮箱或用户名" aria-label="邮箱或用户名" />
                 </label>
                 <label class="field">
                   <i class="ph ph-lock" aria-hidden="true"></i>
@@ -1031,16 +1031,16 @@
             <div class="social-divider"><span>其他登录方式</span></div>
             <div class="social-row" aria-label="其他登录方式">
               <button class="social-button" type="button" data-provider="Silver Wolf" aria-label="使用 Silver Wolf 通行证登录">
-                <img src="/assets/silver-wolf-logo.png" alt="" />
+                <img src="/assets/silver-wolf-logo.png?v=1" alt="" />
               </button>
               <button class="social-button brand" type="button" data-provider="Google" aria-label="使用 Google 登录">
-                <img src="/assets/icons/google.svg" alt="" />
+                <img src="/assets/icons/google.svg?v=1" alt="" />
               </button>
               <button class="social-button brand" type="button" data-provider="Microsoft" aria-label="使用 Microsoft 登录">
-                <img src="/assets/icons/microsoft.svg" alt="" />
+                <img src="/assets/icons/microsoft.svg?v=1" alt="" />
               </button>
               <button class="social-button brand" type="button" data-provider="Discord" aria-label="使用 Discord 登录">
-                <img src="/assets/icons/discord.svg" alt="" />
+                <img src="/assets/icons/discord.svg?v=1" alt="" />
               </button>
             </div>
 
@@ -1147,11 +1147,16 @@
         return data;
       }
 
-      function saveAuthentication(data, account) {
+      function saveAuthentication(data, account, password = loginPassword.value) {
         localStorage.setItem(USER_TOKEN_KEY, data.token);
+        sessionStorage.setItem("silver-wolf-auth-token", data.token); // SPA 兼容
         localStorage.setItem(USER_INFO_KEY, JSON.stringify(data.user));
         if (rememberAccount.checked) {
-          localStorage.setItem(REMEMBERED_ACCOUNT_KEY, account);
+          // 记住账号 + 密码
+          localStorage.setItem(
+            REMEMBERED_ACCOUNT_KEY,
+            JSON.stringify({ account, password }),
+          );
         } else {
           localStorage.removeItem(REMEMBERED_ACCOUNT_KEY);
         }
@@ -1192,7 +1197,7 @@
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ email, code, password, confirmPassword: confirmation }),
             }));
-            saveAuthentication(data, email);
+            saveAuthentication(data, email, registerPassword.value);
             showMessage("档案创建完成，正在进入系统…", "success");
             setTimeout(() => location.assign(nextUrl), 420);
           }
@@ -1261,8 +1266,21 @@
         });
       });
 
-      const rememberedAccount = localStorage.getItem(REMEMBERED_ACCOUNT_KEY);
-      if (rememberedAccount) loginAccount.value = rememberedAccount;
+      // 回填记住的账号 + 密码
+      const rememberedRaw = localStorage.getItem(REMEMBERED_ACCOUNT_KEY);
+      if (rememberedRaw) {
+        try {
+          const remembered = JSON.parse(rememberedRaw);
+          if (remembered && remembered.account) {
+            loginAccount.value = remembered.account;
+            if (remembered.password) loginPassword.value = remembered.password;
+            rememberAccount.checked = true;
+          }
+        } catch {
+          // 兼容旧格式：纯字符串账号
+          loginAccount.value = rememberedRaw;
+        }
+      }
       if (localStorage.getItem(USER_TOKEN_KEY)) {
         showMessage("检测到有效登录信息，可直接进入系统", "success");
         submitText.textContent = "重新登录";

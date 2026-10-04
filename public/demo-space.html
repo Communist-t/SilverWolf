@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Silver Wolf · 数字凝聚 → 原图显现</title>
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23eeeaff'/%3E%3Cpath d='M20 46 12 20l8 10 8-12 8 12 8-10-8 26H20z' fill='%236847F5'/%3E%3Ccircle cx='24' cy='24' r='3' fill='%23fff'/%3E%3Ccircle cx='40' cy='24' r='3' fill='%23fff'/%3E%3C/svg%3E" />
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #11101d;
+        --ink-soft: #45425f;
+        --muted: #777491;
+        --purple: #6847f5;
+        --purple-deep: #4b2be0;
+        --purple-soft: #eeeaff;
+        --cyan: #20a7c8;
+        --line: rgba(73, 64, 121, 0.16);
+        --surface: rgba(255, 255, 255, 0.86);
+        --gridline: rgba(105, 75, 245, 0.06);
+        --mono: "Cascadia Mono", "SF Mono", ui-monospace, "Segoe UI Mono", Consolas, monospace;
+        --sans: "Segoe UI Variable Text", DengXian, "Microsoft YaHei UI", "Noto Sans SC", system-ui, sans-serif;
+        --disp: Bahnschrift, "Segoe UI Variable Display", DengXian, system-ui, sans-serif;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0; width: 100%; height: 100%; overflow: hidden;
+        background: #f9f9ff; color: var(--ink); font-family: var(--sans);
+        -webkit-font-smoothing: antialiased;
+      }
+      .scene {
+        position: relative; width: 100%; height: 100dvh; isolation: isolate;
+        background:
+          linear-gradient(140deg, #ffffff 0%, #f8f8ff 58%, #f1f5ff 100%);
+      }
+
+      /* 淡紫网格底纹（landing 同款） */
+      .grid-bg {
+        position: absolute; inset: 0; z-index: 0; pointer-events: none;
+        background-image:
+          linear-gradient(var(--gridline) 1px, transparent 1px),
+          linear-gradient(90deg, var(--gridline) 1px, transparent 1px);
+        background-size: 46px 46px;
+        mask-image: radial-gradient(120% 120% at 50% 42%, #000 20%, rgba(0,0,0,.5) 60%, transparent 100%);
+      }
+
+      /* 最终定格层：清晰银狼原图，凝聚完成后淡入 */
+      .final-img {
+        position: absolute; inset: 0; z-index: 1;
+        width: 100%; height: 100%; object-fit: cover; object-position: 50% 40%;
+        opacity: 0;
+        transition: opacity 1100ms ease;
+      }
+      .scene.revealed .final-img { opacity: 1; }
+
+      /* 过渡粒子 canvas：光点→线条→淡出 */
+      #fx { position: absolute; inset: 0; z-index: 2; width: 100%; height: 100%; }
+      .scene.revealed #fx { opacity: 0; transition: opacity 600ms ease; }
+
+      /* 让原图与文字融合的柔和遮罩（紫色调） */
+      .veil {
+        position: absolute; inset: 0; z-index: 3; pointer-events: none;
+        background:
+          linear-gradient(100deg,
+            rgba(255,255,255,.7) 0%, rgba(255,255,255,.42) 32%, rgba(255,255,255,.05) 58%, rgba(255,255,255,0) 76%),
+          linear-gradient(180deg, rgba(255,255,255,.22) 0%, rgba(255,255,255,0) 24%, rgba(255,255,255,0) 76%, rgba(255,255,255,.4) 100%);
+      }
+
+      .holo-panel {
+        position: absolute; z-index: 4;
+        top: 50%; left: clamp(24px, 6vw, 96px);
+        width: min(520px, calc(100vw - 48px)); transform: translateY(-50%);
+        padding: 30px 30px 26px;
+        border: 1px solid var(--line); border-radius: 16px;
+        background: var(--surface);
+        box-shadow: 0 18px 50px rgba(64, 48, 128, 0.1);
+        backdrop-filter: blur(6px);
+      }
+      .holo-panel::before, .holo-panel::after {
+        content: ""; position: absolute; width: 14px; height: 14px;
+        border: 2px solid var(--purple); opacity: .55;
+      }
+      .holo-panel::before { top: -1px; left: -1px; border-right: 0; border-bottom: 0; border-radius: 5px 0 0 0; }
+      .holo-panel::after { bottom: -1px; right: -1px; border-left: 0; border-top: 0; border-radius: 0 0 5px 0; }
+
+      .eyebrow {
+        display: inline-flex; align-items: center; gap: 10px; margin: 0 0 16px;
+        color: var(--purple); font-family: var(--mono); font-size: 12px; font-weight: 700; letter-spacing: 2px;
+      }
+      .eyebrow .dot {
+        width: 7px; height: 7px; border-radius: 50%; background: var(--purple);
+        box-shadow: 0 0 0 3px rgba(104,71,245,.14), 0 0 12px rgba(104,71,245,.5);
+        animation: pulse 2.4s ease-in-out infinite;
+      }
+      @keyframes pulse { 0%,100% { box-shadow: 0 0 0 3px rgba(104,71,245,.12), 0 0 8px rgba(104,71,245,.4);} 50% { box-shadow: 0 0 0 6px rgba(104,71,245,.2), 0 0 20px rgba(104,71,245,.8);} }
+
+      .title { margin: 0; font-family: var(--disp); font-weight: 800; line-height: .9; letter-spacing: 1px; color: var(--ink); }
+      .title .accent { display: block; margin-top: 12px; color: var(--purple); font-size: .46em; line-height: 1; font-weight: 700; }
+      .lead { margin: 22px 0 0; color: var(--ink-soft); font-size: 16px; font-weight: 600; line-height: 1.6; max-width: 42ch; }
+      .subline { margin: 8px 0 0; color: var(--muted); font-family: var(--mono); font-size: 11px; letter-spacing: .5px; }
+
+      .actions { display: flex; align-items: center; gap: 16px; margin-top: 26px; }
+      .primary, .secondary {
+        display: inline-flex; align-items: center; justify-content: center; gap: 10px;
+        min-height: 48px; border-radius: 10px; font-family: var(--sans); font-size: 14px; font-weight: 750; cursor: pointer;
+        transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
+      }
+      .primary {
+        min-width: 188px; padding: 0 22px; border: 0; color: #fff;
+        background: linear-gradient(135deg, #7353ff, #4c2fdb);
+        box-shadow: 0 10px 24px rgba(104,71,245,.22);
+      }
+      .primary:hover { transform: translateY(-1px); filter: brightness(1.05); }
+      .secondary { padding: 0 8px; border: 0; color: var(--muted); background: transparent; }
+      .secondary:hover { color: var(--purple); transform: translateY(-1px); }
+
+      .demo { margin-top: 24px; border-top: 1px solid var(--line); padding-top: 16px; }
+      .status { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+      .status span {
+        padding: 5px 11px; border: 1px solid rgba(104,71,245,.18); border-radius: 999px;
+        color: var(--purple); background: rgba(104,71,245,.07); font-family: var(--mono); font-size: 11px; font-weight: 700;
+      }
+      .result {
+        display: grid; grid-template-columns: auto minmax(0,1fr); gap: 12px; align-items: start;
+        margin: 12px 0 0; color: var(--ink-soft); font-size: 13px; line-height: 1.6;
+      }
+      .result strong { color: var(--purple); font-size: 11px; padding-top: 2px; }
+
+      .toast {
+        position: fixed; z-index: 50; left: 50%; bottom: 34px;
+        transform: translateX(-50%) translateY(20px);
+        padding: 11px 20px; border: 1px solid var(--line); border-radius: 10px;
+        color: var(--ink); background: rgba(255,255,255,.95); font-size: 13px;
+        box-shadow: 0 14px 40px rgba(64,48,128,.14);
+        opacity: 0; pointer-events: none; transition: opacity 220ms ease, transform 220ms ease;
+      }
+      .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+      @media (max-width: 760px) {
+        .holo-panel { top: auto; bottom: clamp(16px, 5vh, 48px); left: 16px; width: calc(100vw - 32px); transform: none; padding: 22px 20px 20px; }
+        .title { font-size: 40px; }
+        .lead { font-size: 15px; }
+        .subline { font-size: 12px; }
+        .result { font-size: 14px; line-height: 1.65; }
+        .actions { flex-wrap: wrap; gap: 10px; }
+        .primary { min-width: 100%; }
+        .status span { font-size: 12px; }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .eyebrow .dot { animation: none; }
+        .final-img { opacity: 1 !important; }
+        #fx { display: none; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="scene" id="scene">
+      <div class="grid-bg"></div>
+
+      <!-- 最终定格：清晰银狼原图（填色阶段淡入） -->
+      <img class="final-img" src="assets/silver-wolf-space.png" alt="银狼在深空中的清晰立绘" />
+
+      <!-- 过渡：光点→线条 粒子 canvas -->
+      <canvas id="fx"></canvas>
+
+      <div class="veil"></div>
+
+      <main class="holo-panel" aria-label="Silver Wolf 介绍">
+        <p class="eyebrow"><span class="dot"></span>INTELLIGENT AGENT ONLINE</p>
+        <h1 class="title">SILVER WOLF<span class="accent">AI AGENT SYSTEM</span></h1>
+        <p class="lead">会检索、会记忆，也会把复杂任务一步步做完。</p>
+        <p class="subline">Search, memory and tool execution in one continuous conversation.</p>
+
+        <div class="actions">
+          <button class="primary" id="ctaPrimary" type="button">开始对话 <span aria-hidden="true">→</span></button>
+          <button class="secondary" id="ctaSecondary" type="button">看看她能做什么 <span aria-hidden="true">›</span></button>
+        </div>
+
+        <div class="demo" aria-label="银狼 Agent 任务演示">
+          <div class="status" aria-label="任务执行状态">
+            <span>检索天气</span><span>规划路线</span><span>保留来源</span>
+          </div>
+          <div class="result"><strong>银狼</strong><span>上午以东湖骑行为主，午后转室内展馆；已按降雨概率准备备选路线。</span></div>
+        </div>
+      </main>
+    </div>
+
+    <div class="toast" id="toast" role="status"></div>
+
+    <script>
+      (function () {
+        "use strict";
+
+        var scene = document.getElementById("scene");
+        var canvas = document.getElementById("fx");
+        var ctx = canvas.getContext("2d");
+        var glyphs = "01<>/\\=+*#%&;:[]{}·+*=";
+        var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+        var W = 0, H = 0;
+
+        var particles = [];
+        var t = 0;                  // 全局时间（秒）
+        // 三阶段时间轴：光点 0~1.3s → 线条 1.3~3.2s → 填色显现 3.2s 起
+        var T_DOT_START = 0;
+        var T_DOT_END = 1.3;
+        var T_LINE_START = 1.15;
+        var T_LINE_END = 3.2;
+        var T_FILL = 3.3;
+        var raf = null;
+
+        /* 采样角色：生成光点集（稀疏）与线条集（密集）两组粒子 */
+        function build(img) {
+          var tw = 400;
+          var sc = tw / img.naturalWidth;
+          var th = Math.round(img.naturalHeight * sc);
+          var off = document.createElement("canvas");
+          off.width = tw; off.height = th;
+          var octx = off.getContext("2d");
+          octx.drawImage(img, 0, 0, tw, th);
+          var data = octx.getImageData(0, 0, tw, th).data;
+
+          // 与 .final-img object-fit:cover 对齐
+          var s = Math.max(W / tw, H / th) * 1.0;
+          var dw = tw * s, dh = th * s;
+          var ox = (W - dw) / 2, oy = (H - dh) / 2;
+
+          // 预扫所有"有效"像素（透明/过暗跳过）
+          var valid = [];
+          for (var y = 0; y < th; y++) {
+            for (var x = 0; x < tw; x++) {
+              var i = (y * tw + x) * 4;
+              var a = data[i + 3];
+              if (a < 40) continue;
+              var r = data[i], g = data[i + 1], b = data[i + 2];
+              var lum = (r * 0.299 + g * 0.587 + b * 0.114) / 255;
+              if (lum < 0.12) continue;
+              var tx = ox + x * s, ty = oy + y * s;
+              if (tx < -80 || tx > W + 80 || ty < -80 || ty > H + 80) continue;
+              valid.push({ x: x, y: y, tx: tx, ty: ty, lum: lum });
+            }
+          }
+
+          particles = [];
+
+          // ① 光点集：稀疏采样（大间隔），紫色光点，描绘大致轮廓
+          var stepDot = 9;
+          var dotN = 0;
+          for (var dy = 0; dy < th; dy += stepDot) {
+            for (var dx = 0; dx < tw; dx += stepDot) {
+              var dd = valid[dy * tw + dx];
+              if (!dd) continue;
+              if (dotN++ > 700) break;
+              particles.push({
+                kind: "dot",
+                tx: dd.tx, ty: dd.ty,
+                sx: Math.random() * W, sy: Math.random() * H,
+                phase: Math.random() * 6.28,
+                sp: 0.6 + Math.random() * 0.8,
+                size: 2 + Math.random() * 2
+              });
+            }
+          }
+
+          // ② 线条集：密集采样（细间隔），紫/深紫字符，描绘细节
+          var stepLine = 3;
+          for (var ly = 0; ly < th; ly += stepLine) {
+            for (var lx = 0; lx < tw; lx += stepLine) {
+              var ld = valid[ly * tw + lx];
+              if (!ld) continue;
+              particles.push({
+                kind: "line",
+                tx: ld.tx, ty: ld.ty,
+                sx: Math.random() * W, sy: Math.random() * H,
+                phase: Math.random() * 6.28,
+                sp: 0.55 + Math.random() * 0.9,
+                lum: ld.lum,
+                char: null,
+                size: s
+              });
+            }
+          }
+        }
+
+        function easeOutCubic(x) { return 1 - Math.pow(1 - x, 3); }
+
+        function drawFrame(dt) {
+          // 背景拖尾（淡紫近白）
+          ctx.fillStyle = "rgba(249,249,255,0.06)";
+          ctx.fillRect(0, 0, W, H);
+
+          var i, p;
+
+          // 阶段1：光点描绘轮廓（0~1.3s）
+          if (t >= T_DOT_START && t < T_DOT_END) {
+            var k = Math.min(1, (t - T_DOT_START) / (T_DOT_END - T_DOT_START));
+            ctx.font = "10px 'Cascadia Mono', monospace";
+            for (i = 0; i < particles.length; i++) {
+              p = particles[i];
+              if (p.kind !== "dot") continue;
+              var td = Math.min(1, k * p.sp);
+              var e = easeOutCubic(td);
+              var cx = p.sx + (p.tx - p.sx) * e;
+              var cy = p.sy + (p.ty - p.sy) * e;
+              var alpha = 0.25 + td * 0.55;
+              ctx.fillStyle = "rgba(104,71,245," + alpha.toFixed(2) + ")";
+              ctx.beginPath();
+              ctx.arc(cx, cy, p.size * (1 - td * 0.4), 0, 6.2832);
+              ctx.fill();
+            }
+          }
+
+          // 阶段2：线条描绘细节（1.15~3.2s）
+          if (t >= T_LINE_START) {
+            var k2 = Math.min(1, (t - T_LINE_START) / (T_LINE_END - T_LINE_START));
+            var kFull = Math.max(0, k2);
+            // 光点逐渐淡出
+            var dotFade = 1 - k2 * 1.4;
+            if (dotFade > 0) {
+              for (i = 0; i < particles.length; i++) {
+                p = particles[i];
+                if (p.kind !== "dot") continue;
+                ctx.fillStyle = "rgba(104,71,245," + (dotFade * 0.6).toFixed(2) + ")";
+                ctx.beginPath();
+                ctx.arc(p.tx, p.ty, p.size * 0.8, 0, 6.2832);
+                ctx.fill();
+              }
+            }
+            // 线条粒子飞向目标，用字符构成细节
+            for (i = 0; i < particles.length; i++) {
+              p = particles[i];
+              if (p.kind !== "line") continue;
+              var tl = Math.min(1, kFull * p.sp);
+              var el = easeOutCubic(tl);
+              var cx2 = p.sx + (p.tx - p.sx) * el;
+              var cy2 = p.sy + (p.ty - p.sy) * el;
+              if (!p.char || Math.random() < 0.14) p.char = glyphs[(Math.random() * glyphs.length) | 0];
+              var alpha2 = Math.min(1, tl * 1.5 + 0.15);
+              // 按亮度分层：高光偏白、中深紫、暗弱紫（紫色系）
+              if (p.lum > 0.55) ctx.fillStyle = "rgba(90,120,255," + alpha2.toFixed(2) + ")";
+              else if (p.lum > 0.35) ctx.fillStyle = "rgba(104,71,245," + alpha2.toFixed(2) + ")";
+              else ctx.fillStyle = "rgba(120,90,220," + (alpha2 * 0.8).toFixed(2) + ")";
+              ctx.font = p.size + "px 'Cascadia Mono', monospace";
+              ctx.fillText(p.char, cx2, cy2);
+            }
+          }
+
+          // 阶段3：填色 —— 清晰原图淡入，粒子淡出
+          if (t >= T_FILL && !revealed) {
+            revealed = true;
+            scene.classList.add("revealed");
+            if (raf) cancelAnimationFrame(raf);
+            raf = null;
+          }
+        }
+
+        function tick(now) {
+          var dt = Math.min(0.05, (now - (last || now)) / 1000);
+          last = now;
+          t += dt;
+          drawFrame(dt);
+          if (!revealed && raf) raf = requestAnimationFrame(tick);
+        }
+
+        var revealed = false;
+        var last = 0;
+
+        function resize() {
+          var dpr = Math.min(window.devicePixelRatio || 1, 2);
+          W = canvas.offsetWidth;
+          H = canvas.offsetHeight;
+          canvas.width = W * dpr;
+          canvas.height = H * dpr;
+          ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+
+        resize();
+
+        var img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = function () {
+          try {
+            build(img);
+            if (reduced) {
+              scene.classList.add("revealed");
+            } else {
+              raf = requestAnimationFrame(tick);
+            }
+          } catch (e) {
+            scene.classList.add("revealed");
+          }
+        };
+        img.src = "assets/silver-wolf-space.png";
+
+        window.addEventListener("resize", resize);
+
+        /* ── Toast ── */
+        var toast = document.getElementById("toast");
+        var timer = null;
+        function showToast(msg) {
+          toast.textContent = msg;
+          toast.classList.add("show");
+          clearTimeout(timer);
+          timer = setTimeout(function () { toast.classList.remove("show"); }, 2000);
+        }
+        document.getElementById("ctaPrimary").addEventListener("click", function () {
+          showToast("开始对话：将接入项目登录页 /login（演示）");
+        });
+        document.getElementById("ctaSecondary").addEventListener("click", function () {
+          showToast("这里将滚动到「核心能力 / 应用场景」场景卡（演示）");
+        });
+      })();
+    </script>
+  </body>
+</html>
